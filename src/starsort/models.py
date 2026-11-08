@@ -2,6 +2,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+OTHER_CATEGORY = "Other"
+
 
 class Repo(BaseModel):
     full_name: str
