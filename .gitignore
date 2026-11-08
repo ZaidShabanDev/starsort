@@ -1,8 +1,9 @@
 # Secrets
 .env
 
-# starsort cache
+# starsort cache and default output from local runs
 .starsort/
+/awesome-stars.md
 
 # Python
 __pycache__/

@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Annotated
 
@@ -8,7 +8,9 @@ import typer
 from dotenv import load_dotenv
 
 from starsort.cache import StarCache, default_cache_path, load_cache, merge_repos, save_cache
+from starsort.categorizer import group_by_language
 from starsort.github import GitHubError, fetch_starred
+from starsort.markdown import render_markdown, write_markdown
 from starsort.models import Repo
 
 app = typer.Typer(add_completion=False, help="Organize your GitHub stars into an awesome-list README.")
@@ -30,6 +32,7 @@ def get_repos(username: str, token: str | None, cache_path: Path, refresh: bool)
 @app.command()
 def main(
     user: Annotated[str, typer.Option("--user", "-u", help="GitHub username whose stars to organize.")],
+    output: Annotated[Path, typer.Option("--output", "-o", help="Markdown file to write.")] = Path("awesome-stars.md"),
     cache_file: Annotated[Path | None, typer.Option("--cache", help="Cache file path. Default: .starsort/<user>.json")] = None,
     refresh: Annotated[bool, typer.Option("--refresh", help="Ignore the cache and refetch all stars.")] = False,
 ) -> None:
@@ -43,10 +46,9 @@ def main(
         typer.secho(f"Error: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1)
 
-    for repo in repos:
-        language = repo.language or "-"
-        description = repo.description or ""
-        typer.echo(f"{repo.full_name}  [{language}]  {repo.stars} stars  {description}")
+    categories = group_by_language(repos)
+    write_markdown(render_markdown(categories, user, date.today()), output)
+    typer.echo(f"Wrote {output} with {len(repos)} repos in {len(categories)} categories.")
 
 
 if __name__ == "__main__":
