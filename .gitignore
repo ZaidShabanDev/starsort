@@ -5,6 +5,13 @@
 .starsort/
 /awesome-stars.md
 
+# Terraform (state can hold account details; the lock file IS committed)
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+infra/terraform.tfvars
+
 # Python
 __pycache__/
 *.py[cod]
