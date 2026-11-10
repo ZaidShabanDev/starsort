@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from strands.types.exceptions import StructuredOutputException
 
 from starsort.cache import StarCache, default_cache_path, load_cache, merge_repos, save_cache
-from starsort.categorizer import categorize_repos, group_assignments, group_by_language, limit_categories
+from starsort.categorizer import group_assignments, group_by_language, uncategorized, update_assignments
 from starsort.github import GitHubError, fetch_starred
 from starsort.markdown import render_markdown, write_markdown
 from starsort.models import Repo
@@ -21,24 +21,38 @@ load_dotenv()  # at import time, so Typer's envvar= options can read values from
 app = typer.Typer(add_completion=False, help="Organize your GitHub stars into an awesome-list README.")
 
 
-def get_repos(username: str, token: str | None, cache_path: Path, refresh: bool) -> list[Repo]:
-    cache = None if refresh else load_cache(cache_path)
-    if cache is None:
+def get_repos(username: str, token: str | None, cache_path: Path, refresh: bool) -> StarCache:
+    cache = load_cache(cache_path)
+    if cache is None or refresh:
         repos = fetch_starred(username, token)
         typer.echo(f"Fetched {len(repos)} starred repos.")
     else:
         new_repos = fetch_starred(username, token, known=cache.repo_names())
         repos = merge_repos(new_repos, cache.repos)
         typer.echo(f"Loaded {len(cache.repos)} repos from cache, {len(new_repos)} new.")
-    save_cache(StarCache(username=username, fetched_at=datetime.now(timezone.utc), repos=repos), cache_path)
-    return repos
+
+    names = {repo.full_name for repo in repos}
+    saved = {name: category for name, category in (cache.categories if cache else {}).items() if name in names}
+    updated = StarCache(username=username, fetched_at=datetime.now(timezone.utc), repos=repos, categories=saved)
+    save_cache(updated, cache_path)
+    return updated
 
 
-def categorize(repos: list[Repo], provider: Provider, model_id: str | None) -> dict[str, list[Repo]]:
-    ask = make_asker(build_model(provider, model_id))
-    typer.echo(f"Categorizing {len(repos)} repos with {provider.value} ({model_id or DEFAULT_MODELS[provider]})...")
-    assignments = categorize_repos(repos, ask, on_batch=lambda done, total: typer.echo(f"  batch {done}/{total} done"))
-    return group_assignments(repos, limit_categories(assignments))
+def categorize(repos: list[Repo], saved: dict[str, str], provider: Provider, model_id: str | None) -> dict[str, str]:
+    pending = len(uncategorized(repos, saved))
+    if pending:
+        typer.echo(
+            f"Categorizing {pending} new repos ({len(repos) - pending} kept) "
+            f"with {provider.value} ({model_id or DEFAULT_MODELS[provider]})..."
+        )
+    else:
+        typer.echo("No new repos to categorize. Keeping saved categories (no AI call).")
+    return update_assignments(
+        repos,
+        saved,
+        ask_factory=lambda: make_asker(build_model(provider, model_id)),
+        on_batch=lambda done, total: typer.echo(f"  batch {done}/{total} done"),
+    )
 
 
 def fail(message: str) -> NoReturn:
@@ -51,24 +65,29 @@ def main(
     user: Annotated[str, typer.Option("--user", "-u", help="GitHub username whose stars to organize.")],
     output: Annotated[Path, typer.Option("--output", "-o", help="Markdown file to write.")] = Path("awesome-stars.md"),
     cache_file: Annotated[Path | None, typer.Option("--cache", help="Cache file path. Default: .starsort/<user>.json")] = None,
-    refresh: Annotated[bool, typer.Option("--refresh", help="Ignore the cache and refetch all stars.")] = False,
+    refresh: Annotated[bool, typer.Option("--refresh", help="Refetch all stars from GitHub (saved categories are kept).")] = False,
     provider: Annotated[Provider, typer.Option("--provider", envvar="STARSORT_PROVIDER", help="Where the AI model runs.")] = Provider.bedrock,
     model: Annotated[str | None, typer.Option("--model", envvar="STARSORT_MODEL", help="Model ID. Default depends on --provider.")] = None,
     no_ai: Annotated[bool, typer.Option("--no-ai", help="Group by language instead of calling the AI (free, offline).")] = False,
+    recategorize: Annotated[bool, typer.Option("--recategorize", help="Forget saved categories and let the AI sort every repo again.")] = False,
 ) -> None:
     token = os.environ.get("GITHUB_TOKEN") or None
     cache_path = cache_file or default_cache_path(user)
 
     try:
-        repos = get_repos(user, token, cache_path, refresh)
+        cache = get_repos(user, token, cache_path, refresh)
     except (GitHubError, httpx.HTTPError) as error:
         fail(str(error))
+    repos = cache.repos
 
     if no_ai or not repos:
         categories = group_by_language(repos)
     else:
         try:
-            categories = categorize(repos, provider, model)
+            saved = {} if recategorize else cache.categories
+            assignments = categorize(repos, saved, provider, model)
+            save_cache(cache.model_copy(update={"categories": assignments}), cache_path)
+            categories = group_assignments(repos, assignments)
         except ProviderError as error:
             fail(str(error))
         except ClientError as error:
