@@ -2,11 +2,13 @@ from datetime import datetime, timezone
 
 from starsort.categorizer import (
     build_batch_prompt,
+    categories_by_size,
     categorize_repos,
     group_assignments,
     group_by_language,
     limit_categories,
     normalize_category,
+    update_assignments,
 )
 from starsort.models import BatchCategorization, Repo, RepoAssignment
 
@@ -131,3 +133,68 @@ def test_group_assignments_keeps_repo_order():
         "AWS": ["a/one", "c/three"],
         "Graphics": ["b/two"],
     }
+
+
+class CountingFactory:
+    """ask_factory that records how often the AI was set up."""
+
+    def __init__(self, ask):
+        self.ask = ask
+        self.calls = 0
+
+    def __call__(self):
+        self.calls += 1
+        return self.ask
+
+
+def test_incremental_run_with_nothing_new_never_calls_the_ai():
+    factory = CountingFactory(FakeAsker())
+    saved = {"a/one": "AWS", "b/two": "Graphics"}
+
+    assignments = update_assignments([make_repo("a/one"), make_repo("b/two")], saved, factory)
+
+    assert assignments == saved
+    assert factory.calls == 0
+
+
+def test_incremental_run_sends_only_new_repos_and_keeps_saved_ones():
+    ask = FakeAsker(answer({"c/new": "AWS"}))
+    saved = {"a/one": "AWS", "b/two": "Graphics"}
+    repos = [make_repo("c/new"), make_repo("a/one"), make_repo("b/two")]
+
+    assignments = update_assignments(repos, saved, CountingFactory(ask))
+
+    assert assignments == {"c/new": "AWS", "a/one": "AWS", "b/two": "Graphics"}
+    assert len(ask.prompts) == 1
+    assert '"full_name": "c/new"' in ask.prompts[0]
+    assert '"full_name": "a/one"' not in ask.prompts[0]
+    assert "- AWS\n- Graphics" in ask.prompts[0]
+
+
+def test_unstarred_repos_are_dropped_from_saved_categories():
+    saved = {"a/one": "AWS", "gone/repo": "Graphics"}
+
+    assignments = update_assignments([make_repo("a/one")], saved, CountingFactory(FakeAsker()))
+
+    assert assignments == {"a/one": "AWS"}
+
+
+def test_limit_keeps_existing_categories_even_when_new_ones_are_bigger():
+    saved = {"old/one": "Tiny Existing"}
+    repos = [make_repo("old/one")] + [make_repo(f"new/{i}") for i in range(6)]
+    ask = FakeAsker(answer({
+        "new/0": "Big", "new/1": "Big", "new/2": "Big",
+        "new/3": "Medium", "new/4": "Medium",
+        "new/5": "Small",
+    }))
+
+    assignments = update_assignments(repos, saved, CountingFactory(ask), max_categories=3)
+
+    assert assignments["old/one"] == "Tiny Existing"
+    assert set(assignments.values()) == {"Tiny Existing", "Big", "Other"}
+
+
+def test_categories_by_size_orders_largest_first_and_skips_other():
+    assignments = {"r/1": "B", "r/2": "A", "r/3": "A", "r/4": "Other", "r/5": "Other", "r/6": "Other"}
+
+    assert categories_by_size(assignments) == ["A", "B"]

@@ -43,3 +43,27 @@ def test_merge_puts_new_repos_first_and_prefers_new_data():
 
     assert [repo.full_name for repo in merged] == ["c/three", "a/one", "b/two"]
     assert merged[1].stars == 99
+
+
+def test_categories_survive_round_trip(tmp_path):
+    path = tmp_path / "octo.json"
+    cache = StarCache(
+        username="octo",
+        fetched_at=datetime.now(timezone.utc),
+        repos=[make_repo("a/one")],
+        categories={"a/one": "AI Agents"},
+    )
+
+    save_cache(cache, path)
+
+    assert load_cache(path).categories == {"a/one": "AI Agents"}
+
+
+def test_old_cache_without_categories_still_loads(tmp_path):
+    path = tmp_path / "old.json"
+    path.write_text(
+        '{"username": "octo", "fetched_at": "2026-11-07T10:00:00Z", "repos": []}',
+        encoding="utf-8",
+    )
+
+    assert load_cache(path).categories == {}
