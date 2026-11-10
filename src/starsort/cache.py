@@ -12,6 +12,7 @@ class StarCache(BaseModel):
     username: str
     fetched_at: datetime
     repos: list[Repo] = Field(default_factory=list)
+    categories: dict[str, str] = Field(default_factory=dict, description="full_name -> category from earlier AI runs")
 
     def repo_names(self) -> set[str]:
         return {repo.full_name for repo in self.repos}

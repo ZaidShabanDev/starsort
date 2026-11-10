@@ -85,16 +85,54 @@ def categorize_repos(
     return assignments
 
 
-def limit_categories(assignments: dict[str, str], max_categories: int = MAX_CATEGORIES) -> dict[str, str]:
-    """Fold the smallest categories into Other so the README never exceeds max_categories."""
+def limit_categories(
+    assignments: dict[str, str],
+    max_categories: int = MAX_CATEGORIES,
+    preferred: Iterable[str] = (),
+) -> dict[str, str]:
+    """Fold the smallest categories into Other so the README never exceeds max_categories.
+
+    Categories in `preferred` (from earlier runs) are kept first, so existing sections never disappear.
+    """
     counts = Counter(category for category in assignments.values() if category != OTHER_CATEGORY)
     has_other = OTHER_CATEGORY in assignments.values()
     if len(counts) + has_other <= max_categories:
         return dict(assignments)
 
-    largest = sorted(counts.items(), key=lambda pair: (-pair[1], pair[0].lower()))
-    keep = {name for name, _ in largest[: max_categories - 1]}
+    preferred_names = set(preferred)
+    ranked = sorted(counts.items(), key=lambda pair: (pair[0] not in preferred_names, -pair[1], pair[0].lower()))
+    keep = {name for name, _ in ranked[: max_categories - 1]}
     return {repo: (category if category in keep else OTHER_CATEGORY) for repo, category in assignments.items()}
+
+
+def categories_by_size(assignments: dict[str, str]) -> list[str]:
+    counts = Counter(category for category in assignments.values() if category != OTHER_CATEGORY)
+    return [name for name, _ in sorted(counts.items(), key=lambda pair: (-pair[1], pair[0].lower()))]
+
+
+def uncategorized(repos: list[Repo], saved: dict[str, str]) -> list[Repo]:
+    return [repo for repo in repos if repo.full_name not in saved]
+
+
+def update_assignments(
+    repos: list[Repo],
+    saved: dict[str, str],
+    ask_factory: Callable[[], Asker],
+    max_categories: int = MAX_CATEGORIES,
+    on_batch: Callable[[int, int], None] | None = None,
+) -> dict[str, str]:
+    """Incremental run: keep saved categories, send only new repos to the AI.
+
+    `ask_factory` is only called when there is something new, so a run with no new stars needs no AI at all.
+    """
+    kept = {repo.full_name: saved[repo.full_name] for repo in repos if repo.full_name in saved}
+    new_repos = uncategorized(repos, saved)
+    if not new_repos:
+        return kept
+
+    existing = categories_by_size(kept)
+    fresh = categorize_repos(new_repos, ask_factory(), existing_categories=existing, on_batch=on_batch)
+    return limit_categories({**kept, **fresh}, max_categories, preferred=existing)
 
 
 def group_assignments(repos: list[Repo], assignments: dict[str, str]) -> dict[str, list[Repo]]:
