@@ -6,7 +6,7 @@ from typing import Annotated, NoReturn
 import httpx
 import typer
 from botocore.exceptions import BotoCoreError, ClientError
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 from strands.types.exceptions import StructuredOutputException
 
 from starsort.cache import StarCache, default_cache_path, load_cache, merge_repos, save_cache
@@ -16,7 +16,8 @@ from starsort.markdown import render_markdown, write_markdown
 from starsort.models import Repo
 from starsort.providers import DEFAULT_MODELS, Provider, ProviderError, build_model, make_asker
 
-load_dotenv()  # at import time, so Typer's envvar= options can read values from .env
+# Import time, so Typer's envvar= options see .env. usecwd: as an installed tool, look where the user runs it.
+load_dotenv(find_dotenv(usecwd=True))
 
 app = typer.Typer(add_completion=False, help="Organize your GitHub stars into an awesome-list README.")
 
