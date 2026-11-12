@@ -24,6 +24,7 @@ def build_headers(token: str | None) -> dict[str, str]:
 def parse_repo(item: dict) -> Repo:
     return Repo(
         full_name=item["full_name"],
+        node_id=item.get("node_id"),
         url=item["html_url"],
         description=item.get("description"),
         topics=item.get("topics") or [],
