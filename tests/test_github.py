@@ -7,6 +7,7 @@ from starsort.github import API_URL, GitHubError, fetch_starred
 def make_item(full_name: str, **overrides) -> dict:
     item = {
         "full_name": full_name,
+        "node_id": f"R_{full_name}",
         "html_url": f"https://github.com/{full_name}",
         "description": f"Description of {full_name}",
         "topics": ["python"],
@@ -49,6 +50,7 @@ def test_fetch_maps_fields():
         repo = fetch_starred("octo", client=client)[0]
 
     assert repo.url == "https://github.com/a/one"
+    assert repo.node_id == "R_a/one"
     assert repo.description is None
     assert repo.topics == []
     assert repo.language is None
