@@ -141,7 +141,7 @@ Copy `.env.example` to `.env` in the folder you run starsort from. Never commit 
 
 | Variable | Purpose |
 |---|---|
-| `GITHUB_TOKEN` | Optional. Raises the GitHub rate limit from 60 to 5,000 requests/hour. No scopes needed for public stars. |
+| `GITHUB_TOKEN` | Optional. Raises the GitHub rate limit from 60 to 5,000 requests/hour. No scopes needed for public stars. Required for `--sync-lists`: use a **classic** token with the `user` scope (fine-grained tokens can read lists but can't create them). |
 | `AWS_PROFILE` | AWS profile for Bedrock, e.g. `starsort` |
 | `AWS_REGION` | Bedrock region, e.g. `us-west-2` |
 | `STARSORT_PROVIDER` | `bedrock` (default) or `anthropic` |
@@ -156,6 +156,8 @@ starsort --user <github-username> -o README.md       # write somewhere else
 starsort --user <github-username> --no-ai            # free and offline: group by language
 starsort --user <github-username> --refresh          # refetch all stars (categories are kept)
 starsort --user <github-username> --recategorize     # let the AI sort everything again
+starsort --user <your-username> --sync-lists --dry-run   # preview GitHub Lists changes
+starsort --user <your-username> --sync-lists             # create/update your GitHub star Lists
 ```
 
 | Option | Description |
@@ -168,6 +170,18 @@ starsort --user <github-username> --recategorize     # let the AI sort everythin
 | `--model` | Model ID |
 | `--no-ai` | Group by language instead of calling the AI |
 | `--recategorize` | Forget saved categories and categorize every repo again |
+| `--sync-lists` | Also put each repo in a GitHub star List named after its category |
+| `--dry-run` | With `--sync-lists`: show what would change, change nothing |
+
+### GitHub star Lists
+
+`--sync-lists` mirrors the categories into GitHub's own **Lists** on your Stars tab, so you get the folders on GitHub itself, not only in Markdown.
+
+- It only works for **your own** account: `GITHUB_TOKEN` must belong to `--user`, and it must be a **classic** token with the `user` scope. Fine-grained tokens can read lists but GitHub rejects them for creating lists.
+- Lists it creates get the description "Managed by starsort". Repos move between those lists when their category changes.
+- **Your own lists are never touched.** If a list with the same name as a category already exists, starsort adds repos to it but never removes anything from it.
+- "Other" doesn't get a list.
+- Run with `--dry-run` first to see the plan.
 
 **Publish it:** create a repo (e.g. `awesome-stars`), run starsort with `-o README.md` inside it, then commit and push. GitHub renders the list on the repo page.
 
@@ -188,6 +202,7 @@ The tests mock both the GitHub API (`httpx.MockTransport`) and the agent, so the
 src/starsort/
   cli.py          Typer CLI: wires everything together
   github.py       fetch starred repos (pagination, token, stop at first known repo)
+  github_lists.py sync categories to GitHub star Lists (GraphQL API)
   cache.py        JSON cache of repos and their categories
   categorizer.py  batching, prompt, name cleanup, category limit, incremental logic
   providers.py    Strands models (Bedrock / Anthropic) and the structured-output agent
@@ -201,7 +216,7 @@ tests/            pytest suite
 
 ## Roadmap
 
-- [ ] Sync categories to GitHub's native star **Lists**
+- [x] Sync categories to GitHub's native star **Lists**
 - [ ] GitHub Action that re-runs weekly and commits the updated list
 - [ ] Hosted web version, so you can use it without installing anything
 
