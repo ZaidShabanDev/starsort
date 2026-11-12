@@ -7,6 +7,7 @@ OTHER_CATEGORY = "Other"
 
 class Repo(BaseModel):
     full_name: str
+    node_id: str | None = None  # GraphQL ID, needed to add the repo to GitHub Lists
     url: str
     description: str | None = None
     topics: list[str] = Field(default_factory=list)

@@ -12,6 +12,7 @@ from strands.types.exceptions import StructuredOutputException
 from starsort.cache import StarCache, default_cache_path, load_cache, merge_repos, save_cache
 from starsort.categorizer import group_assignments, group_by_language, uncategorized, update_assignments
 from starsort.github import GitHubError, fetch_starred
+from starsort.github_lists import GitHubGraphQL, ListsError, apply_sync, plan_sync
 from starsort.markdown import render_markdown, write_markdown
 from starsort.models import Repo
 from starsort.providers import DEFAULT_MODELS, Provider, ProviderError, build_model, make_asker
@@ -56,6 +57,34 @@ def categorize(repos: list[Repo], saved: dict[str, str], provider: Provider, mod
     )
 
 
+def sync_github_lists(token: str, user: str, categories: dict[str, list[Repo]], dry_run: bool) -> None:
+    with GitHubGraphQL(token) as github:
+        login = github.viewer_login()
+        if login.lower() != user.lower():
+            fail(f"--sync-lists can only change your own lists. GITHUB_TOKEN belongs to '{login}', not '{user}'.")
+
+        lists = github.fetch_lists()
+        repos = [repo for group in categories.values() for repo in group]
+        assignments = {repo.full_name: name for name, group in categories.items() for repo in group}
+        node_ids = {repo.full_name: repo.node_id for repo in repos if repo.node_id}
+        plan = plan_sync(lists, assignments, node_ids)
+
+        if not plan.lists_to_create and not plan.changes:
+            typer.echo("GitHub Lists are already up to date.")
+            return
+        typer.echo(f"GitHub Lists: {len(plan.lists_to_create)} to create, {len(plan.changes)} repos to update.")
+        for name in plan.lists_to_create:
+            typer.echo(f"  + list: {name}")
+        for change in plan.changes:
+            typer.echo(f"  {change.full_name} -> {change.target or '(removed from starsort lists)'}")
+        if dry_run:
+            typer.echo("Dry run: nothing was changed on GitHub.")
+            return
+
+        apply_sync(github, plan, lists, on_step=lambda step: typer.echo(f"  done: {step}"))
+        typer.echo("GitHub Lists updated.")
+
+
 def fail(message: str) -> NoReturn:
     typer.secho(f"Error: {message}", fg=typer.colors.RED, err=True)
     raise typer.Exit(code=1)
@@ -71,12 +100,19 @@ def main(
     model: Annotated[str | None, typer.Option("--model", envvar="STARSORT_MODEL", help="Model ID. Default depends on --provider.")] = None,
     no_ai: Annotated[bool, typer.Option("--no-ai", help="Group by language instead of calling the AI (free, offline).")] = False,
     recategorize: Annotated[bool, typer.Option("--recategorize", help="Forget saved categories and let the AI sort every repo again.")] = False,
+    sync_lists: Annotated[bool, typer.Option("--sync-lists", help="Also put each repo in a GitHub star List named after its category. Needs GITHUB_TOKEN with write access.")] = False,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="With --sync-lists: show what would change on GitHub, change nothing.")] = False,
 ) -> None:
     token = os.environ.get("GITHUB_TOKEN") or None
     cache_path = cache_file or default_cache_path(user)
+    if sync_lists and not token:
+        fail("--sync-lists needs GITHUB_TOKEN in .env (a token that can manage your star lists).")
 
     try:
         cache = get_repos(user, token, cache_path, refresh)
+        if sync_lists and any(repo.node_id is None for repo in cache.repos):
+            typer.echo("Refetching all stars once to get the repo IDs GitHub Lists need...")
+            cache = get_repos(user, token, cache_path, refresh=True)
     except (GitHubError, httpx.HTTPError) as error:
         fail(str(error))
     repos = cache.repos
@@ -103,6 +139,12 @@ def main(
 
     write_markdown(render_markdown(categories, user, date.today()), output)
     typer.echo(f"Wrote {output} with {len(repos)} repos in {len(categories)} categories.")
+
+    if sync_lists:
+        try:
+            sync_github_lists(token, user, categories, dry_run)
+        except (ListsError, httpx.HTTPError) as error:
+            fail(str(error))
 
 
 if __name__ == "__main__":
