@@ -11,6 +11,7 @@
 *.tfstate.*
 *.tfplan
 infra/terraform.tfvars
+infra/web/build/
 
 # Python
 __pycache__/
