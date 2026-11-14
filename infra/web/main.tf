@@ -36,9 +36,44 @@ resource "aws_iam_role_policy" "api_logs" {
   policy = data.aws_iam_policy_document.api_logs.json
 }
 
+# ---------- Secrets (SSM Parameter Store) ----------
+
+data "aws_caller_identity" "current" {}
+
+# Exists only after the first SecureString is created, so run the put-parameter commands before apply.
+data "aws_kms_alias" "ssm" {
+  name = "alias/aws/ssm"
+}
+
+data "aws_iam_policy_document" "api_secrets" {
+  statement {
+    actions   = ["ssm:GetParameter"]
+    resources = ["arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${var.ssm_prefix}/*"]
+  }
+
+  statement {
+    actions   = ["kms:Decrypt"]
+    resources = [data.aws_kms_alias.ssm.target_key_arn]
+
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["ssm.${var.aws_region}.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role_policy" "api_secrets" {
+  name   = "read-web-secrets"
+  role   = aws_iam_role.api.id
+  policy = data.aws_iam_policy_document.api_secrets.json
+}
+
+# The whole src/ folder, so "starsort.web.api" imports work the same as locally.
 data "archive_file" "api" {
   type        = "zip"
-  source_file = "${path.module}/../../src/starsort/web/api.py"
+  source_dir  = "${path.module}/../../src"
+  excludes    = ["**/__pycache__/**", "**/*.pyc"]
   output_path = "${path.module}/build/api.zip"
 }
 
@@ -47,10 +82,18 @@ resource "aws_lambda_function" "api" {
   role          = aws_iam_role.api.arn
   filename      = data.archive_file.api.output_path
   code_sha256   = data.archive_file.api.output_base64sha256
-  handler       = "api.handler"
+  handler       = "starsort.web.api.handler"
   runtime       = "python3.13"
   timeout       = 10
   memory_size   = 256
+
+  environment {
+    variables = {
+      GITHUB_CLIENT_ID           = var.github_client_id
+      GITHUB_CLIENT_SECRET_PARAM = "${var.ssm_prefix}/github-client-secret"
+      SESSION_SECRET_PARAM       = "${var.ssm_prefix}/session-secret"
+    }
+  }
 
   logging_config {
     log_format = "JSON"
@@ -76,6 +119,14 @@ resource "aws_apigatewayv2_integration" "api" {
 resource "aws_apigatewayv2_route" "health" {
   api_id    = aws_apigatewayv2_api.http.id
   route_key = "GET /health"
+  target    = "integrations/${aws_apigatewayv2_integration.api.id}"
+}
+
+resource "aws_apigatewayv2_route" "auth" {
+  for_each = toset(["GET /auth/login", "GET /auth/callback", "GET /me"])
+
+  api_id    = aws_apigatewayv2_api.http.id
+  route_key = each.value
   target    = "integrations/${aws_apigatewayv2_integration.api.id}"
 }
 
