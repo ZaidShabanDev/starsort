@@ -38,9 +38,11 @@ class FakeGitHub:
     def __init__(self, *repos: Repo):
         self.repos = list(repos)
         self.calls: list[set[str] | None] = []
+        self.app_auth = None
 
-    def __call__(self, username, token=None, known=None):
+    def __call__(self, username, token=None, known=None, app_auth=None):
         self.calls.append(known)
+        self.app_auth = app_auth
         result = []
         for repo in self.repos:
             if known and repo.full_name in known:
@@ -157,6 +159,12 @@ def test_missing_node_ids_trigger_one_full_refetch_for_lists(monkeypatch):
 
     assert github.calls == [{"a/agent"}, None]
     assert store.cache.repos[0].node_id == "ID-a/agent"
+
+
+def test_app_credentials_are_passed_to_github(github):
+    organize(OrganizeOptions(username="octo", use_ai=False, app_auth=("cid", "csecret")), MemoryStore())
+
+    assert github.app_auth == ("cid", "csecret")
 
 
 def test_file_store_round_trip(tmp_path, github):

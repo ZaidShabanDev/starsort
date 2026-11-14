@@ -5,6 +5,8 @@ from starsort.models import Repo
 API_URL = "https://api.github.com"
 PER_PAGE = 100
 
+AppAuth = tuple[str, str]  # an OAuth App's (client_id, client_secret), sent as HTTP Basic auth
+
 
 class GitHubError(Exception):
     pass
@@ -48,10 +50,12 @@ def fetch_starred(
     token: str | None = None,
     known: set[str] | None = None,
     client: httpx.Client | None = None,
+    app_auth: AppAuth | None = None,
 ) -> list[Repo]:
     """Return starred repos, newest star first.
 
     If `known` is given, stop at the first repo already in it, so only newly starred repos are returned.
+    `app_auth` gives the 5,000 requests/hour OAuth App limit for public data without any user's token.
     """
     owns_client = client is None
     client = client or httpx.Client(base_url=API_URL, timeout=30)
@@ -61,7 +65,7 @@ def fetch_starred(
         url: str | None = f"/users/{username}/starred"
         params: dict | None = {"per_page": PER_PAGE}
         while url:
-            response = client.get(url, params=params, headers=build_headers(token))
+            response = client.get(url, params=params, headers=build_headers(token), auth=app_auth)
             _raise_for_error(response, username)
             for item in response.json():
                 if item["full_name"] in known:
