@@ -11,7 +11,7 @@ from typing import Protocol
 
 from starsort.cache import StarCache, load_cache, merge_repos, save_cache
 from starsort.categorizer import Asker, group_assignments, group_by_language, uncategorized, update_assignments
-from starsort.github import fetch_starred
+from starsort.github import AppAuth, fetch_starred
 from starsort.github_lists import GitHubGraphQL, ListsError, SyncPlan, apply_sync, plan_sync
 from starsort.markdown import render_markdown
 from starsort.models import Repo
@@ -54,6 +54,7 @@ class OrganizeOptions:
     provider: Provider = Provider.bedrock
     model_id: str | None = None
     require_node_ids: bool = False  # GitHub Lists need GraphQL IDs, which old caches don't have
+    app_auth: AppAuth | None = None  # the web worker reads public stars with the OAuth App's credentials
 
 
 @dataclass
@@ -67,15 +68,15 @@ class OrganizeResult:
 def load_stars(options: OrganizeOptions, store: CacheStore, log: Log = _quiet) -> StarCache:
     cache = store.load()
     if cache is None or options.refresh:
-        repos = fetch_starred(options.username, options.token)
+        repos = fetch_starred(options.username, options.token, app_auth=options.app_auth)
         log(f"Fetched {len(repos)} starred repos.")
     else:
-        new_repos = fetch_starred(options.username, options.token, known=cache.repo_names())
+        new_repos = fetch_starred(options.username, options.token, known=cache.repo_names(), app_auth=options.app_auth)
         repos = merge_repos(new_repos, cache.repos)
         log(f"Loaded {len(cache.repos)} repos from cache, {len(new_repos)} new.")
         if options.require_node_ids and any(repo.node_id is None for repo in repos):
             log("Refetching all stars once to get the repo IDs GitHub Lists need...")
-            repos = fetch_starred(options.username, options.token)
+            repos = fetch_starred(options.username, options.token, app_auth=options.app_auth)
 
     names = {repo.full_name for repo in repos}
     saved = {name: category for name, category in (cache.categories if cache else {}).items() if name in names}

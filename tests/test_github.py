@@ -1,3 +1,5 @@
+import base64
+
 import httpx
 import pytest
 
@@ -72,6 +74,14 @@ def test_no_token_sends_no_auth_header():
         fetch_starred("octo", client=client)
 
     assert "Authorization" not in requests[0].headers
+
+
+def test_app_auth_is_sent_as_basic_auth():
+    requests: list[httpx.Request] = []
+    with make_client(paged_handler([[make_item("a/one")]], requests)) as client:
+        fetch_starred("octo", client=client, app_auth=("cid", "csecret"))
+
+    assert requests[0].headers["Authorization"] == "Basic " + base64.b64encode(b"cid:csecret").decode()
 
 
 def test_fetch_stops_at_first_known_repo():

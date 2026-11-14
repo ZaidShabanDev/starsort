@@ -2,9 +2,11 @@ import json
 import urllib.parse
 
 import pytest
+from botocore.exceptions import ClientError
 
-from starsort.web import api, auth
+from starsort.web import api, auth, sessions
 from starsort.web.api import handler
+from starsort.web.jobs import JobStore
 
 USER = {"login": "octo", "id": 1, "name": "Octo Cat", "avatar_url": "https://a"}
 
@@ -14,12 +16,13 @@ def call(route_key: str) -> tuple[int, dict]:
     return response["statusCode"], json.loads(response["body"])
 
 
-def event(route_key: str, query: dict | None = None, cookies: list[str] | None = None) -> dict:
+def event(route_key: str, query: dict | None = None, cookies: list[str] | None = None, path: dict | None = None) -> dict:
     return {
         "routeKey": route_key,
         "requestContext": {"domainName": "api.example.com"},
         "queryStringParameters": query,
         "cookies": cookies,
+        "pathParameters": path,
     }
 
 
@@ -149,5 +152,83 @@ def test_login_cookie_does_not_work_as_a_session(settings):
     fake_session = login_cookie.replace("starsort_login=", "starsort_session=")
 
     response = handler(event("GET /me", cookies=[fake_session]), context=None)
+
+    assert response["statusCode"] == 401
+
+
+# ---------- jobs ----------
+
+
+def session_cookie_for(user: dict) -> str:
+    return f"{sessions.SESSION_COOKIE}={sessions.sign(user, 'session-secret', 'session', 3600)}"
+
+
+@pytest.fixture
+def job_api(monkeypatch, settings, jobs_table):
+    """Real JobStore on an in-memory table; records worker starts instead of invoking Lambda."""
+    started = []
+    monkeypatch.setattr(api, "job_store", lambda: JobStore(jobs_table))
+    monkeypatch.setattr(api, "start_worker", started.append)
+    return started
+
+
+def test_create_job_needs_a_session(job_api):
+    response = handler(event("POST /jobs"), context=None)
+
+    assert response["statusCode"] == 401
+    assert job_api == []
+
+
+def test_create_job_queues_it_and_starts_the_worker(job_api, jobs_table):
+    response = handler(event("POST /jobs", cookies=[session_cookie_for(USER)]), context=None)
+
+    body = json.loads(response["body"])
+    assert response["statusCode"] == 202
+    assert body["status"] == "queued"
+    assert body["login"] == "octo"
+    assert "owner_id" not in body
+    assert job_api == [body["job_id"]]
+    assert jobs_table.items[body["job_id"]]["owner_id"] == "1"
+
+
+def test_create_job_marks_it_failed_when_the_worker_cannot_start(monkeypatch, job_api, jobs_table):
+    def failing_start(job_id):
+        raise ClientError({"Error": {"Code": "TooManyRequestsException", "Message": "slow down"}}, "Invoke")
+
+    monkeypatch.setattr(api, "start_worker", failing_start)
+
+    response = handler(event("POST /jobs", cookies=[session_cookie_for(USER)]), context=None)
+
+    assert response["statusCode"] == 502
+    assert [job["status"] for job in jobs_table.items.values()] == ["failed"]
+
+
+def test_get_job_returns_its_status(job_api):
+    cookie = session_cookie_for(USER)
+    job_id = json.loads(handler(event("POST /jobs", cookies=[cookie]), context=None)["body"])["job_id"]
+
+    response = handler(event("GET /jobs/{job_id}", cookies=[cookie], path={"job_id": job_id}), context=None)
+
+    assert response["statusCode"] == 200
+    assert json.loads(response["body"])["job_id"] == job_id
+
+
+def test_get_job_of_another_user_is_404(job_api):
+    job_id = json.loads(handler(event("POST /jobs", cookies=[session_cookie_for(USER)]), context=None)["body"])["job_id"]
+    other = session_cookie_for({**USER, "login": "mallory", "id": 2})
+
+    response = handler(event("GET /jobs/{job_id}", cookies=[other], path={"job_id": job_id}), context=None)
+
+    assert response["statusCode"] == 404
+
+
+def test_get_unknown_job_is_404(job_api):
+    response = handler(event("GET /jobs/{job_id}", cookies=[session_cookie_for(USER)], path={"job_id": "nope"}), context=None)
+
+    assert response["statusCode"] == 404
+
+
+def test_get_job_needs_a_session(job_api):
+    response = handler(event("GET /jobs/{job_id}", path={"job_id": "x"}), context=None)
 
     assert response["statusCode"] == 401

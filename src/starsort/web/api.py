@@ -7,8 +7,9 @@ from functools import lru_cache
 from typing import Any
 
 import boto3
+from botocore.exceptions import BotoCoreError, ClientError
 
-from starsort.web import auth, sessions
+from starsort.web import auth, jobs, sessions
 
 LOGIN_COOKIE = "starsort_login"
 LOGIN_SECONDS = 10 * 60
@@ -34,6 +35,20 @@ def load_settings() -> Settings:
         client_id=os.environ["GITHUB_CLIENT_ID"],
         client_secret=secret(os.environ["GITHUB_CLIENT_SECRET_PARAM"]),
         session_secret=secret(os.environ["SESSION_SECRET_PARAM"]),
+    )
+
+
+@lru_cache(maxsize=1)
+def job_store() -> jobs.JobStore:
+    return jobs.JobStore(boto3.resource("dynamodb").Table(os.environ["JOBS_TABLE"]))
+
+
+def start_worker(job_id: str) -> None:
+    """Async ("Event") invoke: Lambda queues the job and returns at once, so the API never hits its 30-second limit."""
+    boto3.client("lambda").invoke(
+        FunctionName=os.environ["WORKER_FUNCTION"],
+        InvocationType="Event",
+        Payload=json.dumps({"job_id": job_id}).encode(),
     )
 
 
@@ -95,12 +110,48 @@ def callback(event: dict[str, Any]) -> dict[str, Any]:
     ])
 
 
-def me(event: dict[str, Any]) -> dict[str, Any]:
+def current_user(event: dict[str, Any]) -> dict[str, Any] | None:
     settings = load_settings()
-    user = sessions.verify(sessions.read_cookie(event.get("cookies"), sessions.SESSION_COOKIE) or "", settings.session_secret, "session")
+    return sessions.verify(sessions.read_cookie(event.get("cookies"), sessions.SESSION_COOKIE) or "", settings.session_secret, "session")
+
+
+def not_signed_in() -> dict[str, Any]:
+    return json_response(401, {"error": "not signed in"})
+
+
+def me(event: dict[str, Any]) -> dict[str, Any]:
+    user = current_user(event)
     if user is None:
-        return json_response(401, {"error": "not signed in"})
+        return not_signed_in()
     return json_response(200, {field: user.get(field) for field in auth.USER_FIELDS})
+
+
+def create_job(event: dict[str, Any]) -> dict[str, Any]:
+    user = current_user(event)
+    if user is None:
+        return not_signed_in()
+
+    store = job_store()
+    job = store.create(owner_id=str(user["id"]), login=user["login"])
+    try:
+        start_worker(job["job_id"])
+    except (BotoCoreError, ClientError):
+        store.fail(job["job_id"], "Could not start the job. Please try again.")
+        return json_response(502, {"error": "Could not start the job. Please try again."})
+    return json_response(202, jobs.public_view(job))
+
+
+def get_job(event: dict[str, Any]) -> dict[str, Any]:
+    user = current_user(event)
+    if user is None:
+        return not_signed_in()
+
+    job_id = (event.get("pathParameters") or {}).get("job_id")
+    job = job_store().get(job_id) if job_id else None
+    # Someone else's job answers 404, not 403, so job IDs can't be probed.
+    if job is None or job["owner_id"] != str(user["id"]):
+        return json_response(404, {"error": "job not found"})
+    return json_response(200, jobs.public_view(job))
 
 
 ROUTES = {
@@ -108,6 +159,8 @@ ROUTES = {
     "GET /auth/login": login,
     "GET /auth/callback": callback,
     "GET /me": me,
+    "POST /jobs": create_job,
+    "GET /jobs/{job_id}": get_job,
 }
 
 
