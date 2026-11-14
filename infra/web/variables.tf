@@ -34,6 +34,12 @@ variable "ssm_prefix" {
   default     = "/starsort/web"
 }
 
+variable "bedrock_model_id" {
+  description = "Bedrock model the worker sorts stars with. The account has a model agreement for Sonnet 4.6."
+  type        = string
+  default     = "us.anthropic.claude-sonnet-4-6"
+}
+
 variable "throttle_burst" {
   description = "Short burst limit for the whole API."
   type        = number
