@@ -22,6 +22,18 @@ variable "throttle_rate_per_second" {
   default     = 10
 }
 
+variable "github_client_id" {
+  description = "Client ID of the GitHub OAuth App. Not a secret: it appears in every login URL."
+  type        = string
+  default     = "Ov23liCphMnLTWY3CyEb"
+}
+
+variable "ssm_prefix" {
+  description = "Parameter Store path for the web app's secrets. They are created with the AWS CLI so they never enter Terraform state."
+  type        = string
+  default     = "/starsort/web"
+}
+
 variable "throttle_burst" {
   description = "Short burst limit for the whole API."
   type        = number
