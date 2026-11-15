@@ -15,6 +15,7 @@ class FakeAgent:
     def __init__(self, outcome):
         self.outcome = outcome
         self.calls = []
+        self.event_loop_metrics = SimpleNamespace(accumulated_usage={"inputTokens": 100, "outputTokens": 20, "totalTokens": 120})
 
     def __call__(self, prompt, structured_output_model=None):
         self.calls.append((prompt, structured_output_model))
@@ -52,6 +53,15 @@ def test_asker_gives_up_after_all_attempts():
 
     with pytest.raises(StructuredOutputException):
         make_asker(model=None, agent_factory=factory, attempts=2)("prompt")
+
+
+def test_usage_is_reported_for_every_attempt_including_failed_ones():
+    _, factory = factory_for(StructuredOutputException("bad"), GOOD_ANSWER)
+    usage = []
+
+    make_asker(model=None, agent_factory=factory, attempts=2, on_usage=lambda i, o: usage.append((i, o)))("prompt")
+
+    assert usage == [(100, 20), (100, 20)]
 
 
 def test_anthropic_provider_requires_api_key(monkeypatch):
