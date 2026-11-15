@@ -9,11 +9,17 @@ from typing import Any
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
-from starsort.web import auth, jobs, sessions
+from starsort.web import auth, jobs, limits, sessions
 
 LOGIN_COOKIE = "starsort_login"
 LOGIN_SECONDS = 10 * 60
 AFTER_LOGIN_PATH = "/me"  # the Angular app takes over in P6
+
+BUDGET_MESSAGE = "The free trial is paused until next month: this month's AI budget is used up."
+LIMIT_MESSAGES = {
+    "running": "A job is already running for your account. Wait for it to finish.",
+    "weekly": "The free trial allows one run per week.",  # the UI shows the date from retry_at
+}
 
 
 @dataclass(frozen=True)
@@ -41,6 +47,21 @@ def load_settings() -> Settings:
 @lru_cache(maxsize=1)
 def job_store() -> jobs.JobStore:
     return jobs.JobStore(boto3.resource("dynamodb").Table(os.environ["JOBS_TABLE"]))
+
+
+@lru_cache(maxsize=1)
+def usage_store() -> limits.UsageStore:
+    return limits.UsageStore(boto3.resource("dynamodb").Table(os.environ["USAGE_TABLE"]))
+
+
+@lru_cache(maxsize=1)
+def spend_counter() -> limits.SpendCounter:
+    return limits.SpendCounter(boto3.resource("dynamodb").Table(os.environ["SPEND_TABLE"]))
+
+
+@lru_cache(maxsize=1)
+def load_limits() -> limits.Limits:
+    return limits.Limits.from_env()
 
 
 def start_worker(job_id: str) -> None:
@@ -131,12 +152,22 @@ def create_job(event: dict[str, Any]) -> dict[str, Any]:
     if user is None:
         return not_signed_in()
 
+    trial = load_limits()
+    if spend_counter().month_total() >= trial.monthly_cap_micro_usd:
+        return json_response(503, {"error": BUDGET_MESSAGE, "reason": "budget"})
+
+    owner_id = str(user["id"])
+    check = usage_store().try_start(owner_id, weekly=not trial.is_unlimited(user["login"]))
+    if not check.allowed:
+        return json_response(429, {"error": LIMIT_MESSAGES[check.reason], "reason": check.reason, "retry_at": check.retry_at})
+
     store = job_store()
-    job = store.create(owner_id=str(user["id"]), login=user["login"])
+    job = store.create(owner_id=owner_id, login=user["login"])
     try:
         start_worker(job["job_id"])
     except (BotoCoreError, ClientError):
         store.fail(job["job_id"], "Could not start the job. Please try again.")
+        usage_store().finish(owner_id, refund=True)
         return json_response(502, {"error": "Could not start the job. Please try again."})
     return json_response(202, jobs.public_view(job))
 
