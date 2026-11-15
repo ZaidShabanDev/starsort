@@ -79,6 +79,16 @@ data "aws_iam_policy_document" "api_jobs" {
     actions   = ["lambda:InvokeFunction"]
     resources = [aws_lambda_function.worker.arn]
   }
+
+  statement {
+    actions   = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem"]
+    resources = [aws_dynamodb_table.usage.arn]
+  }
+
+  statement {
+    actions   = ["dynamodb:GetItem"]
+    resources = [aws_dynamodb_table.spend.arn]
+  }
 }
 
 resource "aws_iam_role_policy" "api_jobs" {
@@ -112,6 +122,10 @@ resource "aws_lambda_function" "api" {
       SESSION_SECRET_PARAM       = "${var.ssm_prefix}/session-secret"
       JOBS_TABLE                 = aws_dynamodb_table.jobs.name
       WORKER_FUNCTION            = aws_lambda_function.worker.function_name
+      USAGE_TABLE                = aws_dynamodb_table.usage.name
+      SPEND_TABLE                = aws_dynamodb_table.spend.name
+      MONTHLY_SPEND_CAP_USD      = var.monthly_spend_cap_usd
+      UNLIMITED_LOGINS           = join(",", var.unlimited_logins)
     }
   }
 
@@ -147,6 +161,30 @@ resource "aws_dynamodb_table" "stars" {
 
   attribute {
     name = "owner_id"
+    type = "S"
+  }
+}
+
+# Free trial: one row per GitHub user with their last run start (1 run per week, 1 running job at a time).
+resource "aws_dynamodb_table" "usage" {
+  name         = "${var.name_prefix}-usage"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "owner_id"
+
+  attribute {
+    name = "owner_id"
+    type = "S"
+  }
+}
+
+# Free trial: one row per UTC month ("2026-11") with the AI cost so far, for the monthly hard stop.
+resource "aws_dynamodb_table" "spend" {
+  name         = "${var.name_prefix}-spend"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "month"
+
+  attribute {
+    name = "month"
     type = "S"
   }
 }
@@ -196,6 +234,12 @@ data "aws_iam_policy_document" "worker" {
     sid       = "StarsCache"
     actions   = ["dynamodb:GetItem", "dynamodb:PutItem"]
     resources = [aws_dynamodb_table.stars.arn]
+  }
+
+  statement {
+    sid       = "FreeTrialUsageAndSpend"
+    actions   = ["dynamodb:GetItem", "dynamodb:UpdateItem"]
+    resources = [aws_dynamodb_table.usage.arn, aws_dynamodb_table.spend.arn]
   }
 
   # Only the GitHub client secret; the worker never needs the session secret.
@@ -249,6 +293,10 @@ resource "aws_lambda_function" "worker" {
       GITHUB_CLIENT_ID           = var.github_client_id
       GITHUB_CLIENT_SECRET_PARAM = "${var.ssm_prefix}/github-client-secret"
       STARSORT_MODEL             = var.bedrock_model_id
+      USAGE_TABLE                = aws_dynamodb_table.usage.name
+      SPEND_TABLE                = aws_dynamodb_table.spend.name
+      INPUT_USD_PER_MILLION      = var.bedrock_input_usd_per_million
+      OUTPUT_USD_PER_MILLION     = var.bedrock_output_usd_per_million
     }
   }
 
