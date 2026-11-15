@@ -55,6 +55,7 @@ class OrganizeOptions:
     model_id: str | None = None
     require_node_ids: bool = False  # GitHub Lists need GraphQL IDs, which old caches don't have
     app_auth: AppAuth | None = None  # the web worker reads public stars with the OAuth App's credentials
+    max_stars: int | None = None  # keep only the newest N stars (the web free trial uses 500)
 
 
 @dataclass
@@ -67,16 +68,19 @@ class OrganizeResult:
 
 def load_stars(options: OrganizeOptions, store: CacheStore, log: Log = _quiet) -> StarCache:
     cache = store.load()
+    github = {"app_auth": options.app_auth, "limit": options.max_stars}
     if cache is None or options.refresh:
-        repos = fetch_starred(options.username, options.token, app_auth=options.app_auth)
+        repos = fetch_starred(options.username, options.token, **github)
         log(f"Fetched {len(repos)} starred repos.")
     else:
-        new_repos = fetch_starred(options.username, options.token, known=cache.repo_names(), app_auth=options.app_auth)
+        new_repos = fetch_starred(options.username, options.token, known=cache.repo_names(), **github)
         repos = merge_repos(new_repos, cache.repos)
         log(f"Loaded {len(cache.repos)} repos from cache, {len(new_repos)} new.")
         if options.require_node_ids and any(repo.node_id is None for repo in repos):
             log("Refetching all stars once to get the repo IDs GitHub Lists need...")
-            repos = fetch_starred(options.username, options.token, app_auth=options.app_auth)
+            repos = fetch_starred(options.username, options.token, **github)
+    if options.max_stars:
+        repos = repos[: options.max_stars]
 
     names = {repo.full_name for repo in repos}
     saved = {name: category for name, category in (cache.categories if cache else {}).items() if name in names}

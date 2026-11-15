@@ -40,7 +40,7 @@ class FakeGitHub:
         self.calls: list[set[str] | None] = []
         self.app_auth = None
 
-    def __call__(self, username, token=None, known=None, app_auth=None):
+    def __call__(self, username, token=None, known=None, app_auth=None, limit=None):
         self.calls.append(known)
         self.app_auth = app_auth
         result = []
@@ -48,7 +48,7 @@ class FakeGitHub:
             if known and repo.full_name in known:
                 break
             result.append(repo)
-        return result
+        return result[:limit] if limit else result
 
 
 class FakeAI:
@@ -165,6 +165,17 @@ def test_app_credentials_are_passed_to_github(github):
     organize(OrganizeOptions(username="octo", use_ai=False, app_auth=("cid", "csecret")), MemoryStore())
 
     assert github.app_auth == ("cid", "csecret")
+
+
+def test_max_stars_keeps_only_the_newest_after_merging_with_the_cache(github):
+    store = MemoryStore()
+    organize(OrganizeOptions(username="octo", use_ai=False, max_stars=2), store)
+    github.repos.insert(0, make_repo("c/new"))
+
+    result = organize(OrganizeOptions(username="octo", use_ai=False, max_stars=2), store)
+
+    assert [repo.full_name for repo in result.repos] == ["c/new", "a/agent"]
+    assert [repo.full_name for repo in store.cache.repos] == ["c/new", "a/agent"]
 
 
 def test_file_store_round_trip(tmp_path, github):
