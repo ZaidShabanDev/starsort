@@ -11,9 +11,9 @@ variable "iam_user_name" {
 }
 
 variable "monthly_budget_usd" {
-  description = "Monthly AWS spend limit that triggers email alerts. Alerts only, nothing is blocked."
+  description = "Monthly AWS spend limit that triggers email alerts. Alerts only, nothing is blocked. Just above the web app's $50 hard stop (infra/web monthly_spend_cap_usd)."
   type        = string
-  default     = "5"
+  default     = "55"
 }
 
 variable "alert_email" {

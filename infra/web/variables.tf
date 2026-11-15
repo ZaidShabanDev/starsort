@@ -40,6 +40,30 @@ variable "bedrock_model_id" {
   default     = "us.anthropic.claude-sonnet-4-6"
 }
 
+variable "bedrock_input_usd_per_million" {
+  description = "Price per million input tokens, used to count spend. Geo (us.) cross-region price, about 10% above global; check the Bedrock pricing page."
+  type        = number
+  default     = 3.3
+}
+
+variable "bedrock_output_usd_per_million" {
+  description = "Price per million output tokens, used to count spend. Geo (us.) cross-region price, about 10% above global; check the Bedrock pricing page."
+  type        = number
+  default     = 16.5
+}
+
+variable "monthly_spend_cap_usd" {
+  description = "Free-trial hard stop: no new jobs once this month's counted AI spend reaches this amount."
+  type        = number
+  default     = 50
+}
+
+variable "unlimited_logins" {
+  description = "GitHub logins that skip the 1-run-per-week limit (for testing). The spend cap still applies."
+  type        = list(string)
+  default     = ["ZaidShabanDev"]
+}
+
 variable "throttle_burst" {
   description = "Short burst limit for the whole API."
   type        = number

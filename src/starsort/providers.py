@@ -44,8 +44,19 @@ def build_model(provider: Provider, model_id: str | None = None) -> Any:
     return AnthropicModel(client_args={"api_key": api_key}, model_id=model_id, max_tokens=MAX_OUTPUT_TOKENS)
 
 
-def make_asker(model: Any, agent_factory: Callable[[], Any] | None = None, attempts: int = 2) -> Asker:
-    """Wrap a Strands agent as a function: prompt in, validated BatchCategorization out."""
+OnUsage = Callable[[int, int], None]  # (input_tokens, output_tokens) of one agent call
+
+
+def make_asker(
+    model: Any,
+    agent_factory: Callable[[], Any] | None = None,
+    attempts: int = 2,
+    on_usage: OnUsage | None = None,
+) -> Asker:
+    """Wrap a Strands agent as a function: prompt in, validated BatchCategorization out.
+
+    `on_usage` is called after every attempt, failed ones too, because Bedrock bills those tokens as well.
+    """
     from strands import Agent
     from strands.types.exceptions import StructuredOutputException
 
@@ -62,6 +73,10 @@ def make_asker(model: Any, agent_factory: Callable[[], Any] | None = None, attem
                 return agent(prompt, structured_output_model=BatchCategorization).structured_output
             except StructuredOutputException as error:
                 last_error = error
+            finally:
+                if on_usage:
+                    usage = agent.event_loop_metrics.accumulated_usage
+                    on_usage(usage.get("inputTokens", 0), usage.get("outputTokens", 0))
         raise last_error
 
     return ask

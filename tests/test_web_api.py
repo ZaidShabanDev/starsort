@@ -7,6 +7,7 @@ from botocore.exceptions import ClientError
 from starsort.web import api, auth, sessions
 from starsort.web.api import handler
 from starsort.web.jobs import JobStore
+from starsort.web.limits import Limits, SpendCounter, UsageStore
 
 USER = {"login": "octo", "id": 1, "name": "Octo Cat", "avatar_url": "https://a"}
 
@@ -163,13 +164,24 @@ def session_cookie_for(user: dict) -> str:
     return f"{sessions.SESSION_COOKIE}={sessions.sign(user, 'session-secret', 'session', 3600)}"
 
 
+CAP = 50_000_000
+
+
 @pytest.fixture
-def job_api(monkeypatch, settings, jobs_table):
-    """Real JobStore on an in-memory table; records worker starts instead of invoking Lambda."""
+def job_api(monkeypatch, settings, jobs_table, usage_table, spend_table):
+    """Real stores on in-memory tables; records worker starts instead of invoking Lambda."""
     started = []
     monkeypatch.setattr(api, "job_store", lambda: JobStore(jobs_table))
+    monkeypatch.setattr(api, "usage_store", lambda: UsageStore(usage_table))
+    monkeypatch.setattr(api, "spend_counter", lambda: SpendCounter(spend_table))
+    monkeypatch.setattr(api, "load_limits", lambda: Limits(CAP, frozenset({"boss"})))
     monkeypatch.setattr(api, "start_worker", started.append)
     return started
+
+
+def post_job(user: dict = USER) -> tuple[int, dict]:
+    response = handler(event("POST /jobs", cookies=[session_cookie_for(user)]), context=None)
+    return response["statusCode"], json.loads(response["body"])
 
 
 def test_create_job_needs_a_session(job_api):
@@ -232,3 +244,58 @@ def test_get_job_needs_a_session(job_api):
     response = handler(event("GET /jobs/{job_id}", path={"job_id": "x"}), context=None)
 
     assert response["statusCode"] == 401
+
+
+# ---------- free-trial limits ----------
+
+
+def test_second_job_in_the_same_week_is_refused_with_429(job_api, usage_table):
+    post_job()
+    usage_table.items["1"]["active_until"] = 0  # the first run finished
+
+    status, body = post_job()
+
+    assert status == 429
+    assert body["reason"] == "weekly"
+    assert body["retry_at"] > 0
+    assert len(job_api) == 1
+
+
+def test_job_is_refused_while_another_is_running(job_api):
+    post_job()
+
+    status, body = post_job()
+
+    assert (status, body["reason"]) == (429, "running")
+
+
+def test_unlimited_login_can_run_again_in_the_same_week(job_api, usage_table):
+    boss = {**USER, "login": "Boss", "id": 7}
+    post_job(boss)
+    usage_table.items["7"]["active_until"] = 0
+
+    status, _ = post_job(boss)
+
+    assert status == 202
+
+
+def test_jobs_are_refused_when_the_monthly_budget_is_used_up(job_api, spend_table):
+    SpendCounter(spend_table).add(CAP)
+
+    status, body = post_job()
+
+    assert (status, body["reason"]) == (503, "budget")
+    assert job_api == []
+
+
+def test_failed_worker_start_gives_the_week_back(monkeypatch, job_api):
+    def failing_start(job_id):
+        raise ClientError({"Error": {"Code": "ServiceException", "Message": "down"}}, "Invoke")
+
+    monkeypatch.setattr(api, "start_worker", failing_start)
+    post_job()
+    monkeypatch.setattr(api, "start_worker", job_api.append)
+
+    status, _ = post_job()
+
+    assert status == 202

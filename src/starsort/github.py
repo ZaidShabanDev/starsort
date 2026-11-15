@@ -51,11 +51,13 @@ def fetch_starred(
     known: set[str] | None = None,
     client: httpx.Client | None = None,
     app_auth: AppAuth | None = None,
+    limit: int | None = None,
 ) -> list[Repo]:
     """Return starred repos, newest star first.
 
     If `known` is given, stop at the first repo already in it, so only newly starred repos are returned.
     `app_auth` gives the 5,000 requests/hour OAuth App limit for public data without any user's token.
+    `limit` stops after that many repos, so a huge account costs only a few pages.
     """
     owns_client = client is None
     client = client or httpx.Client(base_url=API_URL, timeout=30)
@@ -71,6 +73,8 @@ def fetch_starred(
                 if item["full_name"] in known:
                     return repos
                 repos.append(parse_repo(item))
+                if limit and len(repos) >= limit:
+                    return repos
             next_link = response.links.get("next")
             url = next_link["url"] if next_link else None
             params = None  # the "next" URL already carries the query string

@@ -84,6 +84,16 @@ def test_app_auth_is_sent_as_basic_auth():
     assert requests[0].headers["Authorization"] == "Basic " + base64.b64encode(b"cid:csecret").decode()
 
 
+def test_limit_stops_early_without_fetching_more_pages():
+    requests: list[httpx.Request] = []
+    pages = [[make_item("a/one"), make_item("a/two")], [make_item("b/three")]]
+    with make_client(paged_handler(pages, requests)) as client:
+        repos = fetch_starred("octo", client=client, limit=2)
+
+    assert [repo.full_name for repo in repos] == ["a/one", "a/two"]
+    assert len(requests) == 1
+
+
 def test_fetch_stops_at_first_known_repo():
     requests: list[httpx.Request] = []
     pages = [[make_item("new/one"), make_item("old/two")], [make_item("old/three")]]

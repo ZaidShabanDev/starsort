@@ -11,8 +11,9 @@ class FakeTable:
         self.key = key
         self.items: dict[str, dict] = {}
 
-    def put_item(self, Item, ConditionExpression=None):
-        if ConditionExpression == f"attribute_not_exists({self.key})" and Item[self.key] in self.items:
+    def put_item(self, Item, ConditionExpression=None, ExpressionAttributeNames=None, ExpressionAttributeValues=None):
+        current = self.items.get(Item[self.key])
+        if not self._allowed(current, ConditionExpression, ExpressionAttributeNames or {}, ExpressionAttributeValues or {}):
             raise self._condition_failed("PutItem")
         self.items[Item[self.key]] = dict(Item)
 
@@ -20,17 +21,35 @@ class FakeTable:
         item = self.items.get(Key[self.key])
         return {"Item": dict(item)} if item is not None else {}
 
-    def update_item(self, Key, UpdateExpression, ConditionExpression, ExpressionAttributeNames, ExpressionAttributeValues):
+    def update_item(self, Key, UpdateExpression, ExpressionAttributeNames, ExpressionAttributeValues, ConditionExpression=None):
         item = self.items.get(Key[self.key])
-        if ConditionExpression == f"attribute_exists({self.key})":
-            allowed = item is not None
-        else:
-            name, value = re.fullmatch(r"(#\w+) = (:\w+)", ConditionExpression).groups()
-            allowed = item is not None and item.get(ExpressionAttributeNames[name]) == ExpressionAttributeValues[value]
-        if not allowed:
+        if not self._allowed(item, ConditionExpression, ExpressionAttributeNames, ExpressionAttributeValues):
             raise self._condition_failed("UpdateItem")
-        for name, value in re.findall(r"(#\w+) = (:\w+)", UpdateExpression.removeprefix("SET ")):
-            item[ExpressionAttributeNames[name]] = ExpressionAttributeValues[value]
+        if item is None:  # like DynamoDB, an update without a condition creates the item
+            item = self.items[Key[self.key]] = dict(Key)
+        action, _, assignments = UpdateExpression.partition(" ")
+        if action == "SET":
+            for name, value in re.findall(r"(#\w+) = (:\w+)", assignments):
+                item[ExpressionAttributeNames[name]] = ExpressionAttributeValues[value]
+        elif action == "ADD":
+            name, value = assignments.split(" ")
+            field = ExpressionAttributeNames[name]
+            item[field] = item.get(field, 0) + ExpressionAttributeValues[value]
+
+    def _allowed(self, item, condition, names, values) -> bool:
+        if condition is None:
+            return True
+        for part in condition.split(" AND "):
+            if part == f"attribute_not_exists({self.key})":
+                ok = item is None
+            elif part == f"attribute_exists({self.key})":
+                ok = item is not None
+            else:
+                name, value = re.fullmatch(r"(#\w+) = (:\w+)", part).groups()
+                ok = item is not None and item.get(names[name]) == values[value]
+            if not ok:
+                return False
+        return True
 
     @staticmethod
     def _condition_failed(operation: str) -> ClientError:
@@ -45,3 +64,13 @@ def jobs_table() -> FakeTable:
 @pytest.fixture
 def stars_table() -> FakeTable:
     return FakeTable(key="owner_id")
+
+
+@pytest.fixture
+def usage_table() -> FakeTable:
+    return FakeTable(key="owner_id")
+
+
+@pytest.fixture
+def spend_table() -> FakeTable:
+    return FakeTable(key="month")
