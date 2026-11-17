@@ -1,0 +1,34 @@
+<footer class="footer">
+  <div class="footer__columns">
+    <section>
+      <h2 class="footer__title">Open source</h2>
+      <p>
+        Starsort is free and open source under the MIT license.
+        Fork it or clone it, run it yourself and have fun with it.
+      </p>
+      <a class="btn btn--small btn--plain" [href]="repoUrl" target="_blank" rel="noopener">View the code</a>
+    </section>
+
+    <section>
+      <h2 class="footer__title">Built to learn AWS</h2>
+      <p>
+        A hands-on project for learning real AWS services: Lambda, API Gateway,
+        DynamoDB, S3, CloudFront and Bedrock, all set up with Terraform.
+      </p>
+    </section>
+
+    <section>
+      <h2 class="footer__title">Made by</h2>
+      <p>Zaid Shaban</p>
+      <div class="footer__links">
+        <a class="btn btn--small btn--plain" [href]="githubUrl" target="_blank" rel="noopener">GitHub</a>
+        <a class="btn btn--small btn--plain" [href]="linkedinUrl" target="_blank" rel="noopener">LinkedIn</a>
+      </div>
+    </section>
+  </div>
+
+  <p class="footer__bottom">
+    © {{ year }} Zaid Shaban ·
+    <a [href]="licenseUrl" target="_blank" rel="noopener">MIT License</a>
+  </p>
+</footer>

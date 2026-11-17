@@ -1,0 +1,30 @@
+.theme-switch {
+  display: inline-flex;
+  background: var(--surface);
+  border: var(--border);
+  box-shadow: var(--shadow-sm);
+}
+
+.theme-switch__option {
+  min-height: 36px;
+  padding: 4px 12px;
+  font: 700 0.85rem var(--font-heading);
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-left: var(--border-thin);
+  cursor: pointer;
+
+  &:first-child {
+    border-left: 0;
+  }
+
+  &:hover {
+    background: var(--muted-bg);
+  }
+
+  &[aria-pressed="true"] {
+    color: var(--on-accent);
+    background: var(--lime);
+  }
+}

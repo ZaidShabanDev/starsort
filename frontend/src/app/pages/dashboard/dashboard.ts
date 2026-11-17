@@ -3,12 +3,13 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
 import { Me, StarsortApi, TrialStatus } from '../../starsort-api';
+import { ThemeSwitch } from '../../theme-switch/theme-switch';
 
 export type BannerTone = 'ok' | 'wait' | 'stop';
 
 @Component({
   selector: 'app-dashboard',
-  imports: [DatePipe, RouterLink],
+  imports: [DatePipe, RouterLink, ThemeSwitch],
   templateUrl: './dashboard.html',
   styleUrl: './dashboard.scss',
 })

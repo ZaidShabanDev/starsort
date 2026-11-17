@@ -1,16 +1,12 @@
 <header class="topbar">
   <a class="logo" routerLink="/">★ starsort</a>
-  @if (signedIn()) {
-    <a class="btn btn--small btn--white" routerLink="/dashboard">Dashboard</a>
-  } @else {
-    <a class="btn btn--small btn--white" [href]="loginUrl">Sign in</a>
-  }
+  <app-theme-switch />
 </header>
 
 <main class="page">
   <section class="hero">
     <span class="badge">Free trial</span>
-    <h1 class="hero__title">Your GitHub stars, <mark>sorted.</mark></h1>
+    <h1 class="hero__title">Your GitHub stars, <span class="hero__highlight">sorted.</span></h1>
     <p class="hero__lead">
       Starsort reads the repos you starred, lets AI group them into clear categories,
       and gives you a ready-to-share awesome list.

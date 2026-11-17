@@ -1,6 +1,9 @@
 <header class="topbar">
   <a class="logo" routerLink="/">★ starsort</a>
-  <button type="button" class="btn btn--small btn--white" (click)="signOut()">Sign out</button>
+  <div class="topbar__actions">
+    <app-theme-switch />
+    <button type="button" class="btn btn--small btn--plain" (click)="signOut()">Sign out</button>
+  </div>
 </header>
 
 <main class="page dashboard">
@@ -11,7 +14,7 @@
         <h1 class="profile__name">{{ user.name || user.login }}</h1>
         <p class="profile__login">&#64;{{ user.login }}</p>
         @if (user.trial.unlimited) {
-          <span class="badge badge--lavender">Tester: no weekly limit</span>
+          <span class="badge badge--cyan">Tester: no weekly limit</span>
         }
       </div>
     </section>
