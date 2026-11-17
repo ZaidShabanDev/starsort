@@ -1,0 +1,35 @@
+.dashboard {
+  display: grid;
+  gap: 1.75rem;
+}
+
+.profile {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  background: var(--blue);
+}
+
+.profile__avatar {
+  flex-shrink: 0;
+  border: var(--border);
+  box-shadow: var(--shadow-sm);
+}
+
+.profile__name {
+  margin-bottom: 0;
+  font: 800 clamp(1.5rem, 4vw, 2.25rem) var(--font-display);
+}
+
+.profile__login {
+  margin-bottom: 0.5rem;
+  font-family: var(--font-mono);
+}
+
+.run p {
+  margin-bottom: 1.25rem;
+}
+
+.loading {
+  font-family: var(--font-mono);
+}
