@@ -126,6 +126,7 @@ resource "aws_lambda_function" "api" {
       SPEND_TABLE                = aws_dynamodb_table.spend.name
       MONTHLY_SPEND_CAP_USD      = var.monthly_spend_cap_usd
       UNLIMITED_LOGINS           = join(",", var.unlimited_logins)
+      SITE_URL                   = "https://${aws_cloudfront_distribution.site.domain_name}"
     }
   }
 
@@ -328,14 +329,15 @@ resource "aws_apigatewayv2_integration" "api" {
   payload_format_version = "2.0"
 }
 
+# Every route starts with /api: CloudFront forwards the full path, and sends only /api/* here.
 resource "aws_apigatewayv2_route" "health" {
   api_id    = aws_apigatewayv2_api.http.id
-  route_key = "GET /health"
+  route_key = "GET /api/health"
   target    = "integrations/${aws_apigatewayv2_integration.api.id}"
 }
 
 resource "aws_apigatewayv2_route" "auth" {
-  for_each = toset(["GET /auth/login", "GET /auth/callback", "GET /me"])
+  for_each = toset(["GET /api/auth/login", "GET /api/auth/callback", "POST /api/auth/logout", "GET /api/me"])
 
   api_id    = aws_apigatewayv2_api.http.id
   route_key = each.value
@@ -343,7 +345,7 @@ resource "aws_apigatewayv2_route" "auth" {
 }
 
 resource "aws_apigatewayv2_route" "jobs" {
-  for_each = toset(["POST /jobs", "GET /jobs/{job_id}"])
+  for_each = toset(["POST /api/jobs", "GET /api/jobs/{job_id}"])
 
   api_id    = aws_apigatewayv2_api.http.id
   route_key = each.value
@@ -368,4 +370,150 @@ resource "aws_lambda_permission" "allow_api_gateway" {
   function_name = aws_lambda_function.api.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.http.execution_arn}/*/*"
+}
+
+# ---------- Website: S3 (Angular files) + CloudFront (one address for the site and /api/*) ----------
+
+# Private: only this CloudFront distribution can read it (bucket policy below). Files are uploaded by scripts/deploy_frontend.ps1.
+resource "aws_s3_bucket" "site" {
+  bucket        = "${var.name_prefix}-site-${data.aws_caller_identity.current.account_id}"
+  force_destroy = true # it only holds build output, which can always be rebuilt
+}
+
+resource "aws_s3_bucket_public_access_block" "site" {
+  bucket                  = aws_s3_bucket.site.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_cloudfront_origin_access_control" "site" {
+  name                              = "${var.name_prefix}-site"
+  description                       = "CloudFront reads the private site bucket"
+  origin_access_control_origin_type = "s3"
+  signing_behavior                  = "always"
+  signing_protocol                  = "sigv4"
+}
+
+data "aws_iam_policy_document" "site_bucket" {
+  statement {
+    sid       = "AllowCloudFrontReadOnly"
+    actions   = ["s3:GetObject"]
+    resources = ["${aws_s3_bucket.site.arn}/*"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["cloudfront.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "AWS:SourceArn"
+      values   = [aws_cloudfront_distribution.site.arn]
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "site" {
+  bucket = aws_s3_bucket.site.id
+  policy = data.aws_iam_policy_document.site_bucket.json
+
+  depends_on = [aws_s3_bucket_public_access_block.site]
+}
+
+# Angular routes like /dashboard are not files in S3, so they get index.html. Not CloudFront error pages: those would also hide /api errors.
+resource "aws_cloudfront_function" "spa_routes" {
+  name    = "${var.name_prefix}-spa-routes"
+  runtime = "cloudfront-js-2.0"
+  comment = "Serve index.html for Angular routes (paths without a file extension)"
+  publish = true
+  code    = <<-EOT
+    function handler(event) {
+      var request = event.request;
+      if (request.uri.indexOf('.') === -1) {
+        request.uri = '/index.html';
+      }
+      return request;
+    }
+  EOT
+}
+
+data "aws_cloudfront_cache_policy" "caching_optimized" {
+  name = "Managed-CachingOptimized"
+}
+
+data "aws_cloudfront_cache_policy" "caching_disabled" {
+  name = "Managed-CachingDisabled"
+}
+
+# Forwards cookies, query strings and headers, but not Host: API Gateway needs its own host name.
+data "aws_cloudfront_origin_request_policy" "all_viewer_except_host" {
+  name = "Managed-AllViewerExceptHostHeader"
+}
+
+locals {
+  site_origin_id = "site-bucket"
+  api_origin_id  = "http-api"
+}
+
+resource "aws_cloudfront_distribution" "site" {
+  enabled             = true
+  comment             = "${var.name_prefix}: Angular site and /api/*"
+  default_root_object = "index.html"
+  price_class         = "PriceClass_100"
+
+  origin {
+    origin_id                = local.site_origin_id
+    domain_name              = aws_s3_bucket.site.bucket_regional_domain_name
+    origin_access_control_id = aws_cloudfront_origin_access_control.site.id
+  }
+
+  origin {
+    origin_id   = local.api_origin_id
+    domain_name = replace(aws_apigatewayv2_api.http.api_endpoint, "https://", "")
+
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "https-only"
+      origin_ssl_protocols   = ["TLSv1.2"]
+    }
+  }
+
+  default_cache_behavior {
+    target_origin_id       = local.site_origin_id
+    viewer_protocol_policy = "redirect-to-https"
+    allowed_methods        = ["GET", "HEAD"]
+    cached_methods         = ["GET", "HEAD"]
+    compress               = true
+    cache_policy_id        = data.aws_cloudfront_cache_policy.caching_optimized.id
+
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.spa_routes.arn
+    }
+  }
+
+  ordered_cache_behavior {
+    path_pattern             = "/api/*"
+    target_origin_id         = local.api_origin_id
+    viewer_protocol_policy   = "https-only"
+    allowed_methods          = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+    cached_methods           = ["GET", "HEAD"]
+    compress                 = true
+    cache_policy_id          = data.aws_cloudfront_cache_policy.caching_disabled.id
+    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
+  }
+
+  restrictions {
+    geo_restriction {
+      restriction_type = "none"
+      locations        = []
+    }
+  }
+
+  viewer_certificate {
+    cloudfront_default_certificate = true
+  }
 }
