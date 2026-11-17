@@ -1,0 +1,41 @@
+<header class="topbar">
+  <a class="logo" routerLink="/">★ starsort</a>
+  <button type="button" class="btn btn--small btn--white" (click)="signOut()">Sign out</button>
+</header>
+
+<main class="page dashboard">
+  @if (me(); as user) {
+    <section class="card profile">
+      <img class="profile__avatar" [src]="user.avatar_url" alt="" width="72" height="72">
+      <div>
+        <h1 class="profile__name">{{ user.name || user.login }}</h1>
+        <p class="profile__login">&#64;{{ user.login }}</p>
+        @if (user.trial.unlimited) {
+          <span class="badge badge--lavender">Tester: no weekly limit</span>
+        }
+      </div>
+    </section>
+
+    @let trial = user.trial;
+    <section class="banner" [attr.data-tone]="tone(trial)" role="status">
+      @if (trial.can_run) {
+        <strong>Ready.</strong> You can sort your stars now.
+      } @else if (trial.reason === 'weekly') {
+        <strong>Next free run:</strong> {{ (trial.retry_at ?? 0) * 1000 | date: 'EEE d MMM, HH:mm' }}.
+        {{ trial.message }}
+      } @else {
+        <strong>Not right now.</strong> {{ trial.message }}
+      }
+    </section>
+
+    <section class="card run">
+      <h2>Sort my stars</h2>
+      <p>Starting a run from this page comes in the next update.</p>
+      <button type="button" class="btn" disabled>Start a run</button>
+    </section>
+  } @else if (error()) {
+    <p class="banner" data-tone="stop" role="alert"><strong>Error.</strong> {{ error() }}</p>
+  } @else {
+    <p class="loading">Loading your account…</p>
+  }
+</main>

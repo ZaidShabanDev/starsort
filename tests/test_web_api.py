@@ -7,9 +7,10 @@ from botocore.exceptions import ClientError
 from starsort.web import api, auth, sessions
 from starsort.web.api import handler
 from starsort.web.jobs import JobStore
-from starsort.web.limits import Limits, SpendCounter, UsageStore
+from starsort.web.limits import WEEK_SECONDS, Limits, SpendCounter, UsageStore
 
 USER = {"login": "octo", "id": 1, "name": "Octo Cat", "avatar_url": "https://a"}
+SITE = "https://site.example.com"
 
 
 def call(route_key: str) -> tuple[int, dict]:
@@ -34,7 +35,7 @@ def cookie_pair(set_cookie: str) -> str:
 
 @pytest.fixture
 def settings(monkeypatch):
-    monkeypatch.setattr(api, "load_settings", lambda: api.Settings("cid", "csecret", "session-secret"))
+    monkeypatch.setattr(api, "load_settings", lambda: api.Settings("cid", "csecret", "session-secret", SITE))
 
 
 @pytest.fixture
@@ -51,14 +52,14 @@ def github(monkeypatch):
 
 
 def start_login() -> tuple[str, str]:
-    """Run /auth/login and return (state sent to GitHub, login cookie)."""
-    response = handler(event("GET /auth/login"), context=None)
+    """Run /api/auth/login and return (state sent to GitHub, login cookie)."""
+    response = handler(event("GET /api/auth/login"), context=None)
     query = urllib.parse.parse_qs(urllib.parse.urlparse(response["headers"]["location"]).query)
     return query["state"][0], cookie_pair(response["cookies"][0])
 
 
 def test_health_returns_ok():
-    status, body = call("GET /health")
+    status, body = call("GET /api/health")
 
     assert status == 200
     assert body == {"status": "ok", "service": "starsort"}
@@ -71,44 +72,52 @@ def test_unknown_route_returns_404():
     assert body["route"] == "GET /nope"
 
 
+def test_old_routes_without_the_api_prefix_are_gone():
+    status, _ = call("GET /health")
+
+    assert status == 404
+
+
 def test_responses_are_json():
-    response = handler({"routeKey": "GET /health"}, context=None)
+    response = handler({"routeKey": "GET /api/health"}, context=None)
 
     assert response["headers"]["content-type"] == "application/json"
 
 
 def test_login_redirects_to_github_with_a_login_cookie(settings):
-    response = handler(event("GET /auth/login"), context=None)
+    response = handler(event("GET /api/auth/login"), context=None)
 
     location = response["headers"]["location"]
     assert response["statusCode"] == 302
     assert location.startswith(auth.AUTHORIZE_URL)
-    assert "redirect_uri=https%3A%2F%2Fapi.example.com%2Fauth%2Fcallback" in location
+    assert "redirect_uri=https%3A%2F%2Fsite.example.com%2Fapi%2Fauth%2Fcallback" in location
     assert response["cookies"][0].startswith("starsort_login=")
-    assert "Path=/auth" in response["cookies"][0]
+    assert "Path=/api/auth" in response["cookies"][0]
 
 
-def test_full_login_sets_session_and_me_returns_user(settings, github):
+def test_full_login_sets_session_and_me_returns_user(job_api, github):
     state, login_cookie = start_login()
 
-    response = handler(event("GET /auth/callback", {"code": "c1", "state": state}, [login_cookie]), context=None)
+    response = handler(event("GET /api/auth/callback", {"code": "c1", "state": state}, [login_cookie]), context=None)
 
     assert response["statusCode"] == 302
-    assert response["headers"]["location"] == "/me"
-    assert github[0]["redirect_uri"] == "https://api.example.com/auth/callback"
+    assert response["headers"]["location"] == "/dashboard"
+    assert github[0]["redirect_uri"] == f"{SITE}/api/auth/callback"
     session_cookie = cookie_pair(response["cookies"][0])
     assert session_cookie.startswith("starsort_session=")
     assert "gho_token" not in json.dumps(response)
 
-    me = handler(event("GET /me", cookies=[session_cookie]), context=None)
+    me = handler(event("GET /api/me", cookies=[session_cookie]), context=None)
+    body = json.loads(me["body"])
     assert me["statusCode"] == 200
-    assert json.loads(me["body"]) == USER
+    assert {field: body[field] for field in USER} == USER
+    assert body["trial"]["can_run"] is True
 
 
 def test_callback_with_wrong_state_is_rejected(settings, github):
     _, login_cookie = start_login()
 
-    response = handler(event("GET /auth/callback", {"code": "c1", "state": "forged"}, [login_cookie]), context=None)
+    response = handler(event("GET /api/auth/callback", {"code": "c1", "state": "forged"}, [login_cookie]), context=None)
 
     assert response["statusCode"] == 400
     assert github == []
@@ -117,14 +126,14 @@ def test_callback_with_wrong_state_is_rejected(settings, github):
 def test_callback_without_login_cookie_is_rejected(settings, github):
     state, _ = start_login()
 
-    response = handler(event("GET /auth/callback", {"code": "c1", "state": state}), context=None)
+    response = handler(event("GET /api/auth/callback", {"code": "c1", "state": state}), context=None)
 
     assert response["statusCode"] == 400
     assert github == []
 
 
 def test_callback_when_user_denies_access(settings, github):
-    response = handler(event("GET /auth/callback", {"error": "access_denied"}), context=None)
+    response = handler(event("GET /api/auth/callback", {"error": "access_denied"}), context=None)
 
     assert response["statusCode"] == 400
     assert github == []
@@ -137,13 +146,13 @@ def test_callback_reports_github_failure(settings, monkeypatch):
     monkeypatch.setattr(auth, "exchange_code", failing_exchange)
     state, login_cookie = start_login()
 
-    response = handler(event("GET /auth/callback", {"code": "c1", "state": state}, [login_cookie]), context=None)
+    response = handler(event("GET /api/auth/callback", {"code": "c1", "state": state}, [login_cookie]), context=None)
 
     assert response["statusCode"] == 502
 
 
 def test_me_without_session_is_401(settings):
-    response = handler(event("GET /me"), context=None)
+    response = handler(event("GET /api/me"), context=None)
 
     assert response["statusCode"] == 401
 
@@ -152,9 +161,17 @@ def test_login_cookie_does_not_work_as_a_session(settings):
     _, login_cookie = start_login()
     fake_session = login_cookie.replace("starsort_login=", "starsort_session=")
 
-    response = handler(event("GET /me", cookies=[fake_session]), context=None)
+    response = handler(event("GET /api/me", cookies=[fake_session]), context=None)
 
     assert response["statusCode"] == 401
+
+
+def test_logout_clears_the_session_cookie(settings):
+    response = handler(event("POST /api/auth/logout"), context=None)
+
+    assert response["statusCode"] == 200
+    assert response["cookies"][0].startswith("starsort_session=;")
+    assert "Max-Age=0" in response["cookies"][0]
 
 
 # ---------- jobs ----------
@@ -180,19 +197,19 @@ def job_api(monkeypatch, settings, jobs_table, usage_table, spend_table):
 
 
 def post_job(user: dict = USER) -> tuple[int, dict]:
-    response = handler(event("POST /jobs", cookies=[session_cookie_for(user)]), context=None)
+    response = handler(event("POST /api/jobs", cookies=[session_cookie_for(user)]), context=None)
     return response["statusCode"], json.loads(response["body"])
 
 
 def test_create_job_needs_a_session(job_api):
-    response = handler(event("POST /jobs"), context=None)
+    response = handler(event("POST /api/jobs"), context=None)
 
     assert response["statusCode"] == 401
     assert job_api == []
 
 
 def test_create_job_queues_it_and_starts_the_worker(job_api, jobs_table):
-    response = handler(event("POST /jobs", cookies=[session_cookie_for(USER)]), context=None)
+    response = handler(event("POST /api/jobs", cookies=[session_cookie_for(USER)]), context=None)
 
     body = json.loads(response["body"])
     assert response["statusCode"] == 202
@@ -209,7 +226,7 @@ def test_create_job_marks_it_failed_when_the_worker_cannot_start(monkeypatch, jo
 
     monkeypatch.setattr(api, "start_worker", failing_start)
 
-    response = handler(event("POST /jobs", cookies=[session_cookie_for(USER)]), context=None)
+    response = handler(event("POST /api/jobs", cookies=[session_cookie_for(USER)]), context=None)
 
     assert response["statusCode"] == 502
     assert [job["status"] for job in jobs_table.items.values()] == ["failed"]
@@ -217,31 +234,31 @@ def test_create_job_marks_it_failed_when_the_worker_cannot_start(monkeypatch, jo
 
 def test_get_job_returns_its_status(job_api):
     cookie = session_cookie_for(USER)
-    job_id = json.loads(handler(event("POST /jobs", cookies=[cookie]), context=None)["body"])["job_id"]
+    job_id = json.loads(handler(event("POST /api/jobs", cookies=[cookie]), context=None)["body"])["job_id"]
 
-    response = handler(event("GET /jobs/{job_id}", cookies=[cookie], path={"job_id": job_id}), context=None)
+    response = handler(event("GET /api/jobs/{job_id}", cookies=[cookie], path={"job_id": job_id}), context=None)
 
     assert response["statusCode"] == 200
     assert json.loads(response["body"])["job_id"] == job_id
 
 
 def test_get_job_of_another_user_is_404(job_api):
-    job_id = json.loads(handler(event("POST /jobs", cookies=[session_cookie_for(USER)]), context=None)["body"])["job_id"]
+    job_id = json.loads(handler(event("POST /api/jobs", cookies=[session_cookie_for(USER)]), context=None)["body"])["job_id"]
     other = session_cookie_for({**USER, "login": "mallory", "id": 2})
 
-    response = handler(event("GET /jobs/{job_id}", cookies=[other], path={"job_id": job_id}), context=None)
+    response = handler(event("GET /api/jobs/{job_id}", cookies=[other], path={"job_id": job_id}), context=None)
 
     assert response["statusCode"] == 404
 
 
 def test_get_unknown_job_is_404(job_api):
-    response = handler(event("GET /jobs/{job_id}", cookies=[session_cookie_for(USER)], path={"job_id": "nope"}), context=None)
+    response = handler(event("GET /api/jobs/{job_id}", cookies=[session_cookie_for(USER)], path={"job_id": "nope"}), context=None)
 
     assert response["statusCode"] == 404
 
 
 def test_get_job_needs_a_session(job_api):
-    response = handler(event("GET /jobs/{job_id}", path={"job_id": "x"}), context=None)
+    response = handler(event("GET /api/jobs/{job_id}", path={"job_id": "x"}), context=None)
 
     assert response["statusCode"] == 401
 
@@ -299,3 +316,55 @@ def test_failed_worker_start_gives_the_week_back(monkeypatch, job_api):
     status, _ = post_job()
 
     assert status == 202
+
+
+# ---------- trial status on /api/me ----------
+
+
+def me_trial(user: dict = USER) -> dict:
+    response = handler(event("GET /api/me", cookies=[session_cookie_for(user)]), context=None)
+    return json.loads(response["body"])["trial"]
+
+
+def test_me_shows_the_next_run_date_after_a_run(job_api, usage_table):
+    post_job()
+    usage_table.items["1"]["active_until"] = 0
+
+    trial = me_trial()
+
+    assert trial["can_run"] is False
+    assert trial["reason"] == "weekly"
+    assert trial["retry_at"] == usage_table.items["1"]["last_started_at"] + WEEK_SECONDS
+    assert trial["message"] == api.LIMIT_MESSAGES["weekly"]
+
+
+def test_me_shows_a_running_job(job_api):
+    post_job()
+
+    assert me_trial()["reason"] == "running"
+
+
+def test_me_shows_the_trial_is_paused_when_the_budget_is_used_up(job_api, spend_table):
+    SpendCounter(spend_table).add(CAP)
+
+    trial = me_trial()
+
+    assert (trial["can_run"], trial["reason"], trial["message"]) == (False, "budget", api.BUDGET_MESSAGE)
+
+
+def test_me_marks_unlimited_testers(job_api, usage_table):
+    boss = {**USER, "login": "Boss", "id": 7}
+    post_job(boss)
+    usage_table.items["7"]["active_until"] = 0
+
+    trial = me_trial(boss)
+
+    assert (trial["unlimited"], trial["can_run"]) == (True, True)
+    assert me_trial()["unlimited"] is False
+
+
+def test_me_does_not_use_up_a_run(job_api, usage_table):
+    me_trial()
+
+    assert usage_table.items == {}
+    assert post_job()[0] == 202

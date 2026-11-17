@@ -1,0 +1,52 @@
+<header class="topbar">
+  <a class="logo" routerLink="/">★ starsort</a>
+  @if (signedIn()) {
+    <a class="btn btn--small btn--white" routerLink="/dashboard">Dashboard</a>
+  } @else {
+    <a class="btn btn--small btn--white" [href]="loginUrl">Sign in</a>
+  }
+</header>
+
+<main class="page">
+  <section class="hero">
+    <span class="badge">Free trial</span>
+    <h1 class="hero__title">Your GitHub stars, <mark>sorted.</mark></h1>
+    <p class="hero__lead">
+      Starsort reads the repos you starred, lets AI group them into clear categories,
+      and gives you a ready-to-share awesome list.
+    </p>
+    @if (signedIn()) {
+      <a class="btn btn--big" routerLink="/dashboard">Open your dashboard</a>
+    } @else {
+      <a class="btn btn--big" [href]="loginUrl">Sign in with GitHub</a>
+    }
+  </section>
+
+  <section class="steps" aria-label="How it works">
+    <article class="card step">
+      <span class="step__number" aria-hidden="true">1</span>
+      <h2>Sign in</h2>
+      <p>Log in with GitHub. Starsort only reads your public profile and your public stars.</p>
+    </article>
+    <article class="card step">
+      <span class="step__number" aria-hidden="true">2</span>
+      <h2>Sort</h2>
+      <p>AI puts each repo into a category, like "Web frameworks" or "DevOps".</p>
+    </article>
+    <article class="card step">
+      <span class="step__number" aria-hidden="true">3</span>
+      <h2>Share</h2>
+      <p>Copy or download a clean Markdown list of all your stars.</p>
+    </article>
+  </section>
+
+  <section class="card rules" aria-labelledby="rules-title">
+    <h2 id="rules-title">Free trial rules</h2>
+    <ul>
+      <li><strong>1 run per week</strong> for each GitHub account.</li>
+      <li>Up to your <strong>500 newest</strong> stars per run.</li>
+      <li>Runs pause for everyone when this month's AI budget is used up.</li>
+      <li>Your GitHub token is <strong>never stored</strong>.</li>
+    </ul>
+  </section>
+</main>

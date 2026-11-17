@@ -1,0 +1,56 @@
+.hero {
+  margin-bottom: 4rem;
+}
+
+.hero__title {
+  margin: 1.25rem 0 1rem;
+  font: 800 clamp(2.5rem, 7vw, 4.5rem) / 1.05 var(--font-display);
+
+  mark {
+    padding: 0 0.15em;
+    color: var(--ink);
+    background: var(--yellow);
+    border: var(--border-thick);
+    box-shadow: var(--shadow);
+  }
+}
+
+.hero__lead {
+  max-width: 34rem;
+  margin-bottom: 2rem;
+  font-size: 1.15rem;
+}
+
+.steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 3rem;
+}
+
+// Broken grid on purpose: the middle card sits a little lower on wide screens.
+@media (min-width: 720px) {
+  .step:nth-child(2) {
+    transform: translateY(1.5rem);
+  }
+}
+
+.step__number {
+  display: inline-grid;
+  place-items: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  margin-bottom: 0.75rem;
+  font: 700 1.1rem var(--font-mono);
+  background: var(--blue);
+  border: var(--border);
+}
+
+.rules {
+  background: var(--pink);
+
+  ul {
+    margin: 0;
+    padding-left: 1.25rem;
+  }
+}

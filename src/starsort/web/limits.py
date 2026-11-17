@@ -54,23 +54,35 @@ def _condition_failed(error: ClientError) -> bool:
     return error.response["Error"]["Code"] == "ConditionalCheckFailedException"
 
 
+def _start_check(item: dict[str, Any] | None, weekly: bool, now: int) -> StartCheck:
+    last_started = int(item["last_started_at"]) if item else 0
+    active_until = int(item["active_until"]) if item else 0
+    if active_until > now:
+        return StartCheck(False, "running", active_until)
+    if weekly and last_started and now < last_started + WEEK_SECONDS:
+        return StartCheck(False, "weekly", last_started + WEEK_SECONDS)
+    return StartCheck(True)
+
+
 class UsageStore:
     """One row per GitHub user: when their last run started, and until when a job counts as running."""
 
     def __init__(self, table: Any):
         self.table = table
 
+    def check(self, owner_id: str, weekly: bool = True, now: float | None = None) -> StartCheck:
+        """Read-only version of try_start, for the dashboard banner."""
+        now = int(time.time() if now is None else now)
+        return _start_check(self.table.get_item(Key={"owner_id": owner_id}).get("Item"), weekly, now)
+
     def try_start(self, owner_id: str, weekly: bool = True, now: float | None = None) -> StartCheck:
         now = int(time.time() if now is None else now)
         item = self.table.get_item(Key={"owner_id": owner_id}).get("Item")
+        check = _start_check(item, weekly, now)
+        if not check.allowed:
+            return check
+
         last_started = int(item["last_started_at"]) if item else 0
-        active_until = int(item["active_until"]) if item else 0
-
-        if active_until > now:
-            return StartCheck(False, "running", active_until)
-        if weekly and last_started and now < last_started + WEEK_SECONDS:
-            return StartCheck(False, "weekly", last_started + WEEK_SECONDS)
-
         row = {
             "owner_id": owner_id,
             "last_started_at": now,
