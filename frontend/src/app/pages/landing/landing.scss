@@ -5,14 +5,12 @@
 .hero__title {
   margin: 1.25rem 0 1rem;
   font: 800 clamp(2.5rem, 7vw, 4.5rem) / 1.05 var(--font-display);
+}
 
-  mark {
-    padding: 0 0.15em;
-    color: var(--ink);
-    background: var(--yellow);
-    border: var(--border-thick);
-    box-shadow: var(--shadow);
-  }
+// Colored text with a hard shadow: loud, but nothing like the boxed buttons, so it doesn't look clickable.
+.hero__highlight {
+  color: var(--highlight);
+  text-shadow: 0.05em 0.05em 0 var(--line);
 }
 
 .hero__lead {
@@ -28,13 +26,6 @@
   margin-bottom: 3rem;
 }
 
-// Broken grid on purpose: the middle card sits a little lower on wide screens.
-@media (min-width: 720px) {
-  .step:nth-child(2) {
-    transform: translateY(1.5rem);
-  }
-}
-
 .step__number {
   display: inline-grid;
   place-items: center;
@@ -42,12 +33,15 @@
   height: 2.5rem;
   margin-bottom: 0.75rem;
   font: 700 1.1rem var(--font-mono);
-  background: var(--blue);
+  color: var(--on-accent);
+  background: var(--cyan);
   border: var(--border);
 }
 
 .rules {
-  background: var(--pink);
+  color: var(--on-accent);
+  background: var(--violet);
+  border-color: var(--on-accent);
 
   ul {
     margin: 0;

@@ -87,7 +87,7 @@ describe('Dashboard', () => {
   it('signs out and returns to the landing page', async () => {
     const page = await render((request) => request.flush(user()));
 
-    (page.querySelector('button.btn--white') as HTMLButtonElement).click();
+    (page.querySelector('button.btn--plain') as HTMLButtonElement).click();
     http.expectOne({ method: 'POST', url: '/api/auth/logout' }).flush({ status: 'signed out' });
 
     expect(router.navigateByUrl).toHaveBeenCalledWith('/');

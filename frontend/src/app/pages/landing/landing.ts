@@ -1,10 +1,11 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { LOGIN_URL, StarsortApi } from '../../starsort-api';
+import { ThemeSwitch } from '../../theme-switch/theme-switch';
 
 @Component({
   selector: 'app-landing',
-  imports: [RouterLink],
+  imports: [RouterLink, ThemeSwitch],
   templateUrl: './landing.html',
   styleUrl: './landing.scss',
 })
