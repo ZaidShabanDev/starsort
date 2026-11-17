@@ -12,8 +12,9 @@ from botocore.exceptions import BotoCoreError, ClientError
 from starsort.web import auth, jobs, limits, sessions
 
 LOGIN_COOKIE = "starsort_login"
+LOGIN_COOKIE_PATH = "/api/auth"
 LOGIN_SECONDS = 10 * 60
-AFTER_LOGIN_PATH = "/me"  # the Angular app takes over in P6
+AFTER_LOGIN_PATH = "/dashboard"  # an Angular route, served through the same CloudFront address
 
 BUDGET_MESSAGE = "The free trial is paused until next month: this month's AI budget is used up."
 LIMIT_MESSAGES = {
@@ -27,6 +28,7 @@ class Settings:
     client_id: str
     client_secret: str
     session_secret: str
+    site_url: str  # the CloudFront address; requests reach the Lambda with API Gateway's own host name
 
 
 @lru_cache(maxsize=1)
@@ -41,6 +43,7 @@ def load_settings() -> Settings:
         client_id=os.environ["GITHUB_CLIENT_ID"],
         client_secret=secret(os.environ["GITHUB_CLIENT_SECRET_PARAM"]),
         session_secret=secret(os.environ["SESSION_SECRET_PARAM"]),
+        site_url=os.environ["SITE_URL"],
     )
 
 
@@ -88,8 +91,8 @@ def redirect(location: str, cookies: list[str]) -> dict[str, Any]:
     return {"statusCode": 302, "headers": {"location": location, "cache-control": "no-store"}, "cookies": cookies, "body": ""}
 
 
-def callback_url(event: dict[str, Any]) -> str:
-    return f"https://{event['requestContext']['domainName']}/auth/callback"
+def callback_url(settings: Settings) -> str:
+    return f"{settings.site_url}/api/auth/callback"
 
 
 def health(event: dict[str, Any]) -> dict[str, Any]:
@@ -102,8 +105,8 @@ def login(event: dict[str, Any]) -> dict[str, Any]:
     verifier, challenge = auth.new_pkce()
     login_data = sessions.sign({"state": state, "verifier": verifier}, settings.session_secret, "login", LOGIN_SECONDS)
     return redirect(
-        auth.authorize_url(settings.client_id, callback_url(event), state, challenge),
-        [sessions.make_cookie(LOGIN_COOKIE, login_data, LOGIN_SECONDS, path="/auth")],
+        auth.authorize_url(settings.client_id, callback_url(settings), state, challenge),
+        [sessions.make_cookie(LOGIN_COOKIE, login_data, LOGIN_SECONDS, path=LOGIN_COOKIE_PATH)],
     )
 
 
@@ -118,7 +121,7 @@ def callback(event: dict[str, Any]) -> dict[str, Any]:
         return json_response(400, {"error": "Login expired or invalid. Please sign in again."})
 
     try:
-        token = auth.exchange_code(settings.client_id, settings.client_secret, query["code"], callback_url(event), login_data["verifier"])
+        token = auth.exchange_code(settings.client_id, settings.client_secret, query["code"], callback_url(settings), login_data["verifier"])
         user = auth.fetch_user(token)
     except auth.OAuthError as error:
         return json_response(502, {"error": str(error)})
@@ -127,8 +130,12 @@ def callback(event: dict[str, Any]) -> dict[str, Any]:
     session = sessions.sign(user, settings.session_secret, "session", sessions.SESSION_SECONDS)
     return redirect(AFTER_LOGIN_PATH, [
         sessions.make_cookie(sessions.SESSION_COOKIE, session, sessions.SESSION_SECONDS),
-        sessions.clear_cookie(LOGIN_COOKIE, path="/auth"),
+        sessions.clear_cookie(LOGIN_COOKIE, path=LOGIN_COOKIE_PATH),
     ])
+
+
+def logout(event: dict[str, Any]) -> dict[str, Any]:
+    return json_response(200, {"status": "signed out"}, [sessions.clear_cookie(sessions.SESSION_COOKIE)])
 
 
 def current_user(event: dict[str, Any]) -> dict[str, Any] | None:
@@ -140,11 +147,30 @@ def not_signed_in() -> dict[str, Any]:
     return json_response(401, {"error": "not signed in"})
 
 
+def budget_used_up(trial: limits.Limits) -> bool:
+    return spend_counter().month_total() >= trial.monthly_cap_micro_usd
+
+
+def trial_status(user: dict[str, Any]) -> dict[str, Any]:
+    """Whether this user could start a run now, and if not why and until when. Read-only."""
+    trial = load_limits()
+    unlimited = trial.is_unlimited(user["login"])
+    status: dict[str, Any] = {"unlimited": unlimited, "can_run": False, "reason": None, "retry_at": None, "message": None}
+    if budget_used_up(trial):
+        return {**status, "reason": "budget", "message": BUDGET_MESSAGE}
+
+    check = usage_store().check(str(user["id"]), weekly=not unlimited)
+    if check.allowed:
+        return {**status, "can_run": True}
+    return {**status, "reason": check.reason, "retry_at": check.retry_at, "message": LIMIT_MESSAGES[check.reason]}
+
+
 def me(event: dict[str, Any]) -> dict[str, Any]:
     user = current_user(event)
     if user is None:
         return not_signed_in()
-    return json_response(200, {field: user.get(field) for field in auth.USER_FIELDS})
+    profile = {field: user.get(field) for field in auth.USER_FIELDS}
+    return json_response(200, {**profile, "trial": trial_status(user)})
 
 
 def create_job(event: dict[str, Any]) -> dict[str, Any]:
@@ -153,7 +179,7 @@ def create_job(event: dict[str, Any]) -> dict[str, Any]:
         return not_signed_in()
 
     trial = load_limits()
-    if spend_counter().month_total() >= trial.monthly_cap_micro_usd:
+    if budget_used_up(trial):
         return json_response(503, {"error": BUDGET_MESSAGE, "reason": "budget"})
 
     owner_id = str(user["id"])
@@ -185,13 +211,15 @@ def get_job(event: dict[str, Any]) -> dict[str, Any]:
     return json_response(200, jobs.public_view(job))
 
 
+# Everything lives under /api: CloudFront sends /api/* here and every other path to the Angular site.
 ROUTES = {
-    "GET /health": health,
-    "GET /auth/login": login,
-    "GET /auth/callback": callback,
-    "GET /me": me,
-    "POST /jobs": create_job,
-    "GET /jobs/{job_id}": get_job,
+    "GET /api/health": health,
+    "GET /api/auth/login": login,
+    "GET /api/auth/callback": callback,
+    "POST /api/auth/logout": logout,
+    "GET /api/me": me,
+    "POST /api/jobs": create_job,
+    "GET /api/jobs/{job_id}": get_job,
 }
 
 

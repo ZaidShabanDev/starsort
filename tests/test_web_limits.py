@@ -77,6 +77,18 @@ def test_two_starts_at_the_same_moment_cannot_both_win(usage, usage_table):
     assert usage.try_start("1", now=NOW + 10).allowed is False
 
 
+def test_check_reports_the_limit_without_starting_a_run(usage, usage_table):
+    assert usage.check("1", now=NOW).allowed
+    assert usage_table.items == {}
+
+    usage.try_start("1", now=NOW)
+    usage.finish("1")
+
+    check = usage.check("1", now=NOW + 60)
+    assert (check.allowed, check.reason, check.retry_at) == (False, "weekly", NOW + WEEK_SECONDS)
+    assert usage.check("1", weekly=False, now=NOW + 60).allowed
+
+
 def test_finish_for_unknown_user_does_nothing(usage, usage_table):
     usage.finish("nobody")
 
