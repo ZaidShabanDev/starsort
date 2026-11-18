@@ -95,19 +95,30 @@ From source, put `uv run` in front of every command, e.g. `uv run starsort --use
 
 ### Option A: Amazon Bedrock (default)
 
-1. **AWS credentials.** The [`infra/`](infra/) folder has Terraform that creates a least-privilege IAM user (it can only call Bedrock models) and a monthly budget alert:
+1. **AWS credentials: use `aws login`, not access keys.** `aws login` (AWS CLI 2.32+) signs you in through the browser and gives short-lived credentials that refresh on their own, so there is no secret key on disk that could leak:
+
+   ```bash
+   aws login --profile admin     # sign in as an IAM user that may call Bedrock (and run Terraform)
+   ```
+
+   boto3, which starsort uses, can only read `aws login` sessions with the extra `botocore[crt]` package. Instead of adding it, add a profile to `~/.aws/config` that asks the AWS CLI for the credentials:
+
+   ```ini
+   [profile starsort-cli]
+   credential_process = aws configure export-credentials --profile admin --format process
+   region = us-west-2
+   ```
+
+   Then use `AWS_PROFILE=starsort-cli` for starsort. When the session expires, run `aws login --profile admin` again.
+
+   The [`infra/`](infra/) folder has Terraform for a monthly budget alert (it also creates a Bedrock-only IAM user, which you don't need with `aws login`). Terraform reads `aws login` sessions from AWS provider 6.23:
 
    ```bash
    cd infra
    cp terraform.tfvars.example terraform.tfvars   # Windows: Copy-Item. Then set alert_email.
-   terraform init
-   terraform plan
-   terraform apply
-   aws iam create-access-key --user-name starsort
-   aws configure --profile starsort               # region: us-west-2
+   AWS_PROFILE=admin terraform init -upgrade
+   AWS_PROFILE=admin terraform apply
    ```
-
-   Run Terraform with an admin profile (e.g. `AWS_PROFILE=admin`). The access key is created with the CLI on purpose, so the secret never lands in Terraform state.
 
 2. **Model access.** In the Bedrock console (same region), open the playground, pick a Claude model and send a message once. This creates your account's agreement for that model.
 
@@ -142,7 +153,7 @@ Copy `.env.example` to `.env` in the folder you run starsort from. Never commit 
 | Variable | Purpose |
 |---|---|
 | `GITHUB_TOKEN` | Optional. Raises the GitHub rate limit from 60 to 5,000 requests/hour. No scopes needed for public stars. Required for `--sync-lists`: use a **classic** token with the `user` scope (fine-grained tokens can read lists but can't create them). |
-| `AWS_PROFILE` | AWS profile for Bedrock, e.g. `starsort` |
+| `AWS_PROFILE` | AWS profile for Bedrock, e.g. `starsort-cli` (see [Set up AI access](#option-a-amazon-bedrock-default)) |
 | `AWS_REGION` | Bedrock region, e.g. `us-west-2` |
 | `STARSORT_PROVIDER` | `bedrock` (default) or `anthropic` |
 | `STARSORT_MODEL` | Model ID override |
@@ -189,6 +200,31 @@ starsort --user <your-username> --sync-lists             # create/update your Gi
 
 starsort only sends repo names, descriptions, topics and languages. A full run over about 1,000 repos is roughly 100k tokens, which is around $1 or less on Claude Sonnet- or Opus-class models. Later runs only pay for newly starred repos, and a run with nothing new makes no AI call. Check current prices on the [Amazon Bedrock](https://aws.amazon.com/bedrock/pricing/) or [Anthropic](https://www.anthropic.com/pricing) pricing pages.
 
+## Web app
+
+starsort also runs as a hosted web app, so people can try it without installing anything: sign in with GitHub, start a run, get the list. It is a hands-on project for learning real AWS services.
+
+```text
+Browser ──> CloudFront ──┬─ /*     ──> S3 (Angular site)
+                         └─ /api/* ──> API Gateway ──> API Lambda ──> DynamoDB
+                                                           │ (async)
+                                                           └──> Worker Lambda ──> GitHub + Bedrock
+```
+
+- **Sign in with GitHub (OAuth).** The GitHub token is used once to read your public profile, then dropped. The session is a signed, HttpOnly cookie.
+- **Runs are background jobs.** The API queues the job, and the worker sorts your stars with the same code as the CLI and saves the result in DynamoDB.
+- **Free trial limits:** 1 run per GitHub account per week, up to the 500 newest stars, and a monthly AI spend cap that pauses runs for everyone.
+- **One address.** CloudFront serves the site and forwards `/api/*` to API Gateway, so the session cookie works without CORS.
+- **No secrets in code or Terraform state.** They live in SSM Parameter Store. All infrastructure is Terraform in [`infra/web/`](infra/web/).
+
+**Deploy your own** (needs an AWS account, a GitHub OAuth App, Terraform, Node 24 and PowerShell for the scripts):
+
+1. In the SSM Parameter Store console, create two `SecureString` parameters: `/starsort/web/github-client-secret` (your OAuth App's client secret) and `/starsort/web/session-secret` (a long random string). Using the console keeps the secrets out of your shell history.
+2. Build the worker's dependencies layer: `./scripts/build_layer.ps1`
+3. In [`infra/web/variables.tf`](infra/web/variables.tf), set `github_client_id` and `unlimited_logins` to your own, then run `terraform init` and `terraform apply` in `infra/web` (with `AWS_PROFILE=admin`).
+4. Set the OAuth App's callback URL to the `oauth_callback_url` output.
+5. Build and upload the site: `npm ci` and `npx ng build` in `frontend/`, then `./scripts/deploy_frontend.ps1`. Open the `site_url` output.
+
 ## Development
 
 ```bash
@@ -196,11 +232,20 @@ uv sync
 uv run pytest
 ```
 
-The tests mock both the GitHub API (`httpx.MockTransport`) and the agent, so they need no network, AWS account or API key.
+The tests mock both the GitHub API (`httpx.MockTransport`) and the agent, so they need no network, AWS account or API key. Frontend tests (Vitest):
+
+```bash
+cd frontend
+npm ci
+npx ng test --watch=false
+```
+
+To work on the site locally, `npx ng serve --proxy-config proxy.conf.json` forwards `/api` to the deployed site.
 
 ```text
 src/starsort/
   cli.py          Typer CLI: wires everything together
+  service.py      the whole flow as plain functions, shared by the CLI and the web worker
   github.py       fetch starred repos (pagination, token, stop at first known repo)
   github_lists.py sync categories to GitHub star Lists (GraphQL API)
   cache.py        JSON cache of repos and their categories
@@ -208,7 +253,11 @@ src/starsort/
   providers.py    Strands models (Bedrock / Anthropic) and the structured-output agent
   markdown.py     awesome-list rendering
   models.py       Pydantic models
-infra/            Terraform for the Bedrock IAM user and budget
+  web/            Lambda code: api.py (HTTP API), worker.py (runs jobs), auth.py, sessions.py, jobs.py, limits.py
+frontend/         Angular site: landing page and dashboard
+infra/            Terraform: budget alert (and a Bedrock-only IAM user)
+infra/web/        Terraform: the web app (Lambda, API Gateway, DynamoDB, S3, CloudFront)
+scripts/          build_layer.ps1 (worker dependencies), deploy_frontend.ps1 (upload the site)
 tests/            pytest suite
 ```
 
@@ -218,7 +267,10 @@ tests/            pytest suite
 
 - [x] Sync categories to GitHub's native star **Lists**
 - [ ] GitHub Action that re-runs weekly and commits the updated list
-- [ ] Hosted web version, so you can use it without installing anything
+- [x] Hosted web version: GitHub sign-in, dashboard and free-trial limits
+- [ ] Start a run and see its progress and result in the browser
+- [ ] Sync GitHub star Lists from the web app
+- [ ] CI/CD with GitHub Actions
 
 ## License
 
