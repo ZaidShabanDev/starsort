@@ -58,6 +58,12 @@ variable "monthly_spend_cap_usd" {
   default     = 50
 }
 
+variable "worker_reserved_concurrency" {
+  description = "Most worker runs at the same time, so spend can only go a little over the cap. -1 = no limit (needed while the account's Lambda concurrency quota is 10; reserving needs at least 100 left unreserved)."
+  type        = number
+  default     = 3
+}
+
 variable "unlimited_logins" {
   description = "GitHub logins that skip the 1-run-per-week limit (for testing). The spend cap still applies."
   type        = list(string)

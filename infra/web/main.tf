@@ -287,6 +287,9 @@ resource "aws_lambda_function" "worker" {
   timeout       = 900 # Lambda's maximum; jobs.STALE_SECONDS in the code assumes this
   memory_size   = 512
 
+  # At most this many runs call Bedrock at once; extra runs wait in Lambda's async queue.
+  reserved_concurrent_executions = var.worker_reserved_concurrency
+
   environment {
     variables = {
       JOBS_TABLE                 = aws_dynamodb_table.jobs.name
@@ -298,6 +301,7 @@ resource "aws_lambda_function" "worker" {
       SPEND_TABLE                = aws_dynamodb_table.spend.name
       INPUT_USD_PER_MILLION      = var.bedrock_input_usd_per_million
       OUTPUT_USD_PER_MILLION     = var.bedrock_output_usd_per_million
+      MONTHLY_SPEND_CAP_USD      = var.monthly_spend_cap_usd
     }
   }
 
@@ -345,7 +349,7 @@ resource "aws_apigatewayv2_route" "auth" {
 }
 
 resource "aws_apigatewayv2_route" "jobs" {
-  for_each = toset(["POST /api/jobs", "GET /api/jobs/{job_id}"])
+  for_each = toset(["POST /api/jobs", "GET /api/jobs/latest", "GET /api/jobs/{job_id}"])
 
   api_id    = aws_apigatewayv2_api.http.id
   route_key = each.value
