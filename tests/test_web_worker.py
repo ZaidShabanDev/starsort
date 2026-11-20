@@ -7,12 +7,26 @@ from starsort.cache import StarCache
 from starsort.github import GitHubError
 from starsort.models import BatchCategorization, Repo, RepoAssignment
 from starsort.web import jobs, worker
-from starsort.web.jobs import JobStore
-from starsort.web.limits import SpendCounter, UsageStore
-from starsort.web.worker import FAILED_MESSAGE, MAX_STARS, DynamoCacheStore, Tables, WorkerSettings, priced_ask_factory, run_job
+from starsort.web.jobs import STALE_SECONDS, JobStore
+from starsort.web.limits import BUDGET_MESSAGE, SpendCounter, UsageStore
+from starsort.web.worker import (
+    FAILED_MESSAGE,
+    MAX_STARS,
+    WAITED_TOO_LONG_MESSAGE,
+    DynamoCacheStore,
+    Tables,
+    WorkerSettings,
+    priced_ask_factory,
+    run_job,
+)
 
 SETTINGS = WorkerSettings(
-    client_id="cid", client_secret="csecret", model_id="test-model", input_usd_per_million=3.3, output_usd_per_million=16.5
+    client_id="cid",
+    client_secret="csecret",
+    model_id="test-model",
+    input_usd_per_million=3.3,
+    output_usd_per_million=16.5,
+    monthly_cap_micro_usd=50_000_000,
 )
 
 
@@ -154,6 +168,32 @@ def test_unexpected_error_fails_the_job_with_a_safe_message(github, db):
 
     assert db.jobs.get(job_id)["status"] == jobs.FAILED
     assert db.jobs.get(job_id)["error"] == FAILED_MESSAGE
+
+
+def test_job_is_not_run_when_the_budget_ran_out_while_it_waited(github, db):
+    job_id = new_job(db)
+    db.spend.add(SETTINGS.monthly_cap_micro_usd)
+    ai = FakeAI("AI")
+
+    run_job(job_id, db, SETTINGS, ask_factory=ai)
+
+    job = db.jobs.get(job_id)
+    assert ai.asked == []
+    assert (job["status"], job["error"]) == (jobs.FAILED, BUDGET_MESSAGE)
+    assert db.usage.try_start("1").allowed  # the week was given back
+
+
+def test_job_that_waited_too_long_in_the_queue_is_not_run(github, db, jobs_table):
+    job_id = new_job(db)
+    jobs_table.items[job_id]["created_at"] -= STALE_SECONDS + 1
+    ai = FakeAI("AI")
+
+    run_job(job_id, db, SETTINGS, ask_factory=ai)
+
+    job = db.jobs.get(job_id)
+    assert ai.asked == []
+    assert (job["status"], job["error"]) == (jobs.FAILED, WAITED_TOO_LONG_MESSAGE)
+    assert db.usage.try_start("1").allowed
 
 
 def test_priced_asker_adds_every_call_to_the_spend_counter(monkeypatch, db):

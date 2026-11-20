@@ -1,9 +1,11 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, TestRequest, provideHttpClientTesting } from '@angular/common/http/testing';
-import { TestBed } from '@angular/core/testing';
+import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import { Router, provideRouter } from '@angular/router';
 import { Me, TrialStatus } from '../../starsort-api';
 import { Dashboard } from './dashboard';
+import { RunPanel } from './run-panel/run-panel';
 
 const READY: TrialStatus = { unlimited: false, can_run: true, reason: null, retry_at: null, message: null };
 
@@ -27,10 +29,15 @@ describe('Dashboard', () => {
 
   afterEach(() => http.verify());
 
+  let fixture: ComponentFixture<Dashboard>;
+
   async function render(answer: (request: TestRequest) => void): Promise<HTMLElement> {
-    const fixture = TestBed.createComponent(Dashboard);
+    fixture = TestBed.createComponent(Dashboard);
     fixture.detectChanges();
     answer(http.expectOne('/api/me'));
+    fixture.detectChanges();
+    // The run panel appears once the user is loaded and asks for the last run.
+    http.match('/api/jobs/latest').forEach((request) => request.flush({ error: 'no runs yet' }, { status: 404, statusText: 'Not Found' }));
     await fixture.whenStable();
     return fixture.nativeElement as HTMLElement;
   }
@@ -82,6 +89,22 @@ describe('Dashboard', () => {
 
     expect(page.querySelector('[role="alert"]')?.textContent).toContain('Could not load your account');
     expect(router.navigateByUrl).not.toHaveBeenCalled();
+  });
+
+  it('shows the run panel once the user is loaded', async () => {
+    const page = await render((request) => request.flush(user()));
+
+    expect(page.querySelector('app-run-panel')).not.toBeNull();
+  });
+
+  it('reloads the trial status when a run starts or ends', async () => {
+    const page = await render((request) => request.flush(user()));
+
+    fixture.debugElement.query(By.directive(RunPanel)).componentInstance.trialChanged.emit();
+    http.expectOne('/api/me').flush(user({ can_run: false, reason: 'running', message: 'A job is already running.' }));
+    await fixture.whenStable();
+
+    expect(banner(page).dataset['tone']).toBe('wait');
   });
 
   it('signs out and returns to the landing page', async () => {

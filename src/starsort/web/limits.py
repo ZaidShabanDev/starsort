@@ -14,6 +14,7 @@ from botocore.exceptions import ClientError
 from starsort.web.jobs import STALE_SECONDS
 
 WEEK_SECONDS = 7 * 24 * 60 * 60
+BUDGET_MESSAGE = "The free trial is paused until next month: this month's AI budget is used up."
 
 
 @dataclass(frozen=True)
@@ -89,6 +90,8 @@ class UsageStore:
             "previous_started_at": last_started,  # put back if the run fails, so a failure doesn't use up the week
             "active_until": now + STALE_SECONDS,
         }
+        if item and "last_job_id" in item:
+            row["last_job_id"] = item["last_job_id"]
         # Only write if the row is still what we just read: two clicks at the same moment can't both start.
         if item is None:
             condition: dict[str, Any] = {"ConditionExpression": "attribute_not_exists(owner_id)"}
@@ -105,6 +108,20 @@ class UsageStore:
                 return StartCheck(False, "running", now + STALE_SECONDS)
             raise
         return StartCheck(True)
+
+    def remember_job(self, owner_id: str, job_id: str) -> None:
+        """So GET /api/jobs/latest can find the run after a page refresh or on another device."""
+        self.table.update_item(
+            Key={"owner_id": owner_id},
+            UpdateExpression="SET #job = :job",
+            ConditionExpression="attribute_exists(owner_id)",
+            ExpressionAttributeNames={"#job": "last_job_id"},
+            ExpressionAttributeValues={":job": job_id},
+        )
+
+    def last_job_id(self, owner_id: str) -> str | None:
+        item = self.table.get_item(Key={"owner_id": owner_id}).get("Item")
+        return item.get("last_job_id") if item else None
 
     def finish(self, owner_id: str, refund: bool = False) -> None:
         item = self.table.get_item(Key={"owner_id": owner_id}).get("Item")
