@@ -341,7 +341,7 @@ resource "aws_apigatewayv2_route" "health" {
 }
 
 resource "aws_apigatewayv2_route" "auth" {
-  for_each = toset(["GET /api/auth/login", "GET /api/auth/callback", "POST /api/auth/logout", "GET /api/me"])
+  for_each = toset(["GET /api/auth/login", "GET /api/auth/callback", "POST /api/auth/logout", "GET /api/auth/lists", "GET /api/me"])
 
   api_id    = aws_apigatewayv2_api.http.id
   route_key = each.value
