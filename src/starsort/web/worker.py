@@ -15,11 +15,13 @@ from typing import Any
 import boto3
 
 from starsort.cache import StarCache
-from starsort.categorizer import Asker
+from starsort.categorizer import Asker, group_assignments
 from starsort.github import GitHubError
+from starsort.github_lists import ListsError
 from starsort.providers import Provider, build_model, make_asker
-from starsort.service import OrganizeOptions, organize
-from starsort.web.jobs import STALE_SECONDS, JobStore
+from starsort.service import OrganizeOptions, organize, sync_github_lists
+from starsort.web import auth
+from starsort.web.jobs import LISTS, STALE_SECONDS, JobStore
 from starsort.web.limits import BUDGET_MESSAGE, Limits, SpendCounter, UsageStore, cost_micro_usd
 
 logger = logging.getLogger(__name__)
@@ -27,6 +29,11 @@ logger.setLevel(logging.INFO)
 
 FAILED_MESSAGE = "Something went wrong while sorting your stars. Please try again later."
 WAITED_TOO_LONG_MESSAGE = "The run waited too long to start because many people are using Starsort. Please try again."
+SYNC_FAILED_MESSAGE = "Something went wrong while updating your GitHub Lists. Please try again later."
+NO_CATEGORIES_MESSAGE = "There are no categories to sync yet. Start a run first."
+# GitHub allows about 80 content changes a minute and 500 an hour. A paced sync of 300 repos also fits in Lambda's 15 minutes.
+MAX_LIST_CHANGES = 300
+LIST_CHANGE_PAUSE_SECONDS = 1.0
 MAX_STARS = 500  # free-trial cap; also keeps a run well inside the 15-minute Lambda limit
 
 
@@ -163,6 +170,72 @@ def run_job(job_id: str, db: Tables, settings: WorkerSettings, ask_factory: Call
     logger.info("Job %s done: %d repos, %d sent to the AI.", job_id, len(result.repos), result.new_repo_count)
 
 
+def revoke_quietly(settings: WorkerSettings, token: str) -> None:
+    try:
+        auth.revoke_token(settings.client_id, settings.client_secret, token)
+    except auth.OAuthError:
+        logger.warning("Could not revoke a GitHub token; it stays valid until the user removes the app.")
+
+
+def run_sync(
+    job_id: str,
+    token: str,
+    private: bool,
+    db: Tables,
+    settings: WorkerSettings,
+    pause: Callable[[], None] | None = None,
+    revoke: Callable[[str], None] | None = None,
+) -> None:
+    """Copy the user's saved categories to their GitHub star Lists, then cancel the token, whatever happens."""
+    revoke = revoke or (lambda used_token: revoke_quietly(settings, used_token))
+    job = db.jobs.get(job_id)
+    if job is not None and not db.jobs.start(job_id):
+        logger.warning("Skipping sync %s: already started (that invocation revokes the token).", job_id)
+        return
+    if job is None:
+        revoke(token)
+        return
+
+    owner_id = job["owner_id"]
+    try:
+        if time.time() - int(job["created_at"]) > STALE_SECONDS:
+            db.jobs.fail(job_id, WAITED_TOO_LONG_MESSAGE)
+            return
+        cache = DynamoCacheStore(db.stars, owner_id).load()
+        if cache is None or not cache.categories:
+            db.jobs.fail(job_id, NO_CATEGORIES_MESSAGE)
+            return
+        result = sync_github_lists(
+            token,
+            job["login"],
+            group_assignments(cache.repos, cache.categories),
+            log=logger.info,
+            private=private,
+            max_changes=MAX_LIST_CHANGES,
+            pause=pause or (lambda: time.sleep(LIST_CHANGE_PAUSE_SECONDS)),
+            on_progress=lambda done, total: db.jobs.progress(job_id, done, total),
+        )
+        db.jobs.finish_sync(job_id, {
+            "lists_created": result.lists_created,
+            "repos_updated": result.repos_updated,
+            "repos_to_update": result.repos_to_update,
+            "repos_skipped": result.repos_skipped,
+            "skipped_orgs": list(result.skipped_orgs),
+            "complete": result.complete,
+        })
+    except ListsError as error:
+        db.jobs.fail(job_id, str(error))
+    except Exception:
+        logger.exception("Sync %s failed.", job_id)
+        db.jobs.fail(job_id, SYNC_FAILED_MESSAGE)
+    finally:
+        revoke(token)
+        db.usage.finish(owner_id)
+
+
 def handler(event: dict[str, Any], context: Any) -> None:
-    """AWS Lambda entry point, invoked asynchronously by the API with {"job_id": ...}."""
-    run_job(event["job_id"], tables(), load_settings())
+    """AWS Lambda entry point, invoked asynchronously by the API. Never log the event: a Lists sync carries a token."""
+    if event.get("kind") == LISTS:
+        run_sync(event["job_id"], event["token"], event.get("private") is True, tables(), load_settings())
+    else:
+        run_job(event["job_id"], tables(), load_settings())

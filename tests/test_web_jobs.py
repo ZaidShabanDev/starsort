@@ -23,6 +23,23 @@ def test_create_saves_a_queued_job(store):
     assert saved["expires_at"] == 1000 + jobs.KEEP_SECONDS
 
 
+def test_jobs_are_runs_unless_told_otherwise(store):
+    assert store.create("1", "octo")["kind"] == jobs.RUN
+    assert store.create("1", "octo", kind=jobs.LISTS)["kind"] == jobs.LISTS
+
+
+def test_finished_sync_shows_its_counts(store):
+    job_id = store.create("1", "octo", kind=jobs.LISTS)["job_id"]
+
+    store.finish_sync(job_id, {
+        "lists_created": 2, "repos_updated": 10, "repos_to_update": 12, "repos_skipped": 2, "skipped_orgs": ["awslabs"], "complete": True,
+    })
+
+    view = public_view(store.get(job_id))
+    assert (view["kind"], view["status"], view["repos_updated"], view["repos_to_update"]) == (jobs.LISTS, jobs.DONE, 10, 12)
+    assert (view["skipped_orgs"], view["complete"]) == (["awslabs"], True)
+
+
 def test_job_ids_are_unique(store):
     assert store.create("1", "octo")["job_id"] != store.create("1", "octo")["job_id"]
 
