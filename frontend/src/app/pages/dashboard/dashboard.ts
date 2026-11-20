@@ -4,12 +4,13 @@ import { Component, OnInit, inject, signal } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
 import { Me, StarsortApi, TrialStatus } from '../../starsort-api';
 import { ThemeSwitch } from '../../theme-switch/theme-switch';
+import { RunPanel } from './run-panel/run-panel';
 
 export type BannerTone = 'ok' | 'wait' | 'stop';
 
 @Component({
   selector: 'app-dashboard',
-  imports: [DatePipe, RouterLink, ThemeSwitch],
+  imports: [DatePipe, RouterLink, ThemeSwitch, RunPanel],
   templateUrl: './dashboard.html',
   styleUrl: './dashboard.scss',
 })
@@ -21,6 +22,11 @@ export class Dashboard implements OnInit {
   protected readonly error = signal<string | null>(null);
 
   ngOnInit(): void {
+    this.loadMe();
+  }
+
+  /** Also called when a run starts or ends, so the trial banner shows the new status. */
+  protected loadMe(): void {
     this.api.me().subscribe({
       next: (me) => this.me.set(me),
       error: (error: HttpErrorResponse) => {

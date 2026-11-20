@@ -1,0 +1,73 @@
+@let current = job();
+
+<section class="card run" aria-labelledby="run-title">
+  <h2 id="run-title">Sort my stars</h2>
+
+  @if (current && active()) {
+    <div class="run__progress" role="status">
+      @if (current.status === 'queued') {
+        <p><strong>Waiting to start…</strong></p>
+      } @else if (current.batches_total === 0) {
+        <p><strong>Reading your stars from GitHub…</strong></p>
+      } @else {
+        <p><strong>Sorting with AI:</strong> batch {{ current.batches_done }} of {{ current.batches_total }}</p>
+      }
+      <div
+        class="progress"
+        role="progressbar"
+        aria-label="Run progress"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        [attr.aria-valuenow]="percent()"
+      >
+        <div class="progress__bar" [style.width.%]="percent()"></div>
+      </div>
+      <p class="run__hint">You can leave this page. The run keeps going, and the result will be here when you come back.</p>
+    </div>
+  } @else {
+    <p>Starsort reads your newest stars (up to 500), sorts them into categories with AI and writes an awesome list.</p>
+    <div>
+      <button type="button" class="btn" [disabled]="!trial().can_run || starting()" (click)="start()">
+        {{ starting() ? 'Starting…' : 'Start a run' }}
+      </button>
+    </div>
+    @if (!trial().can_run) {
+      <p class="run__hint">You can't start a run right now. The status above says why.</p>
+    }
+  }
+
+  @if (startError(); as message) {
+    <p class="banner" data-tone="stop" role="alert"><strong>Not started.</strong> {{ message }}</p>
+  }
+
+  @if (current && current.status === 'failed') {
+    <p class="banner" data-tone="stop" role="alert"><strong>The last run failed.</strong> {{ current.error }}</p>
+  }
+</section>
+
+@if (current && current.status === 'done') {
+  <section class="card result" aria-labelledby="result-title">
+    <h2 id="result-title">Your awesome list</h2>
+    <p class="result__summary">
+      {{ current.repo_count }} repos in {{ categories().length }} categories ·
+      {{ current.new_repo_count }} new sent to the AI ·
+      {{ current.updated_at * 1000 | date: 'd MMM, HH:mm' }}
+    </p>
+
+    <ul class="result__categories" aria-label="Categories">
+      @for (category of categories(); track category.name) {
+        <li class="chip">
+          <span class="chip__name">{{ category.name }}</span>
+          <span class="chip__count">{{ category.count }}</span>
+        </li>
+      }
+    </ul>
+
+    <div class="result__actions">
+      <button type="button" class="btn" (click)="copy()">{{ copied() ? 'Copied!' : 'Copy Markdown' }}</button>
+      <button type="button" class="btn btn--plain" (click)="download()">Download .md</button>
+    </div>
+
+    <pre class="result__markdown" tabindex="0" aria-label="Markdown of your awesome list">{{ current.markdown }}</pre>
+  </section>
+}

@@ -31,11 +31,7 @@
       }
     </section>
 
-    <section class="card run">
-      <h2>Sort my stars</h2>
-      <p>Starting a run from this page comes in the next update.</p>
-      <button type="button" class="btn" disabled>Start a run</button>
-    </section>
+    <app-run-panel [trial]="trial" (trialChanged)="loadMe()" />
   } @else if (error()) {
     <p class="banner" data-tone="stop" role="alert"><strong>Error.</strong> {{ error() }}</p>
   } @else {
