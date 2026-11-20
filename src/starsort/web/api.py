@@ -16,7 +16,7 @@ LOGIN_COOKIE_PATH = "/api/auth"
 LOGIN_SECONDS = 10 * 60
 AFTER_LOGIN_PATH = "/dashboard"  # an Angular route, served through the same CloudFront address
 
-BUDGET_MESSAGE = "The free trial is paused until next month: this month's AI budget is used up."
+BUDGET_MESSAGE = limits.BUDGET_MESSAGE
 LIMIT_MESSAGES = {
     "running": "A job is already running for your account. Wait for it to finish.",
     "weekly": "The free trial allows one run per week.",  # the UI shows the date from retry_at
@@ -189,6 +189,7 @@ def create_job(event: dict[str, Any]) -> dict[str, Any]:
 
     store = job_store()
     job = store.create(owner_id=owner_id, login=user["login"])
+    usage_store().remember_job(owner_id, job["job_id"])
     try:
         start_worker(job["job_id"])
     except (BotoCoreError, ClientError):
@@ -198,17 +199,27 @@ def create_job(event: dict[str, Any]) -> dict[str, Any]:
     return json_response(202, jobs.public_view(job))
 
 
+def own_job_response(user: dict[str, Any], job_id: str | None, not_found: str) -> dict[str, Any]:
+    job = job_store().get(job_id) if job_id else None
+    # Someone else's job answers 404, not 403, so job IDs can't be probed.
+    if job is None or job["owner_id"] != str(user["id"]):
+        return json_response(404, {"error": not_found})
+    return json_response(200, jobs.public_view(job))
+
+
 def get_job(event: dict[str, Any]) -> dict[str, Any]:
     user = current_user(event)
     if user is None:
         return not_signed_in()
+    return own_job_response(user, (event.get("pathParameters") or {}).get("job_id"), "job not found")
 
-    job_id = (event.get("pathParameters") or {}).get("job_id")
-    job = job_store().get(job_id) if job_id else None
-    # Someone else's job answers 404, not 403, so job IDs can't be probed.
-    if job is None or job["owner_id"] != str(user["id"]):
-        return json_response(404, {"error": "job not found"})
-    return json_response(200, jobs.public_view(job))
+
+def latest_job(event: dict[str, Any]) -> dict[str, Any]:
+    """The user's most recent run, so the dashboard can pick it up again after a refresh."""
+    user = current_user(event)
+    if user is None:
+        return not_signed_in()
+    return own_job_response(user, usage_store().last_job_id(str(user["id"])), "no runs yet")
 
 
 # Everything lives under /api: CloudFront sends /api/* here and every other path to the Angular site.
@@ -219,6 +230,7 @@ ROUTES = {
     "POST /api/auth/logout": logout,
     "GET /api/me": me,
     "POST /api/jobs": create_job,
+    "GET /api/jobs/latest": latest_job,  # API Gateway matches this fixed path before {job_id}
     "GET /api/jobs/{job_id}": get_job,
 }
 

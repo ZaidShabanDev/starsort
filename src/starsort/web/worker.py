@@ -6,6 +6,7 @@ Unlike the API, this needs httpx, pydantic and strands, so its Lambda has the de
 import gzip
 import logging
 import os
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import lru_cache
@@ -18,13 +19,14 @@ from starsort.categorizer import Asker
 from starsort.github import GitHubError
 from starsort.providers import Provider, build_model, make_asker
 from starsort.service import OrganizeOptions, organize
-from starsort.web.jobs import JobStore
-from starsort.web.limits import SpendCounter, UsageStore, cost_micro_usd
+from starsort.web.jobs import STALE_SECONDS, JobStore
+from starsort.web.limits import BUDGET_MESSAGE, Limits, SpendCounter, UsageStore, cost_micro_usd
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 FAILED_MESSAGE = "Something went wrong while sorting your stars. Please try again later."
+WAITED_TOO_LONG_MESSAGE = "The run waited too long to start because many people are using Starsort. Please try again."
 MAX_STARS = 500  # free-trial cap; also keeps a run well inside the 15-minute Lambda limit
 
 
@@ -57,6 +59,7 @@ class WorkerSettings:
     model_id: str
     input_usd_per_million: float
     output_usd_per_million: float
+    monthly_cap_micro_usd: int
 
 
 @dataclass(frozen=True)
@@ -77,6 +80,7 @@ def load_settings() -> WorkerSettings:
         model_id=os.environ["STARSORT_MODEL"],
         input_usd_per_million=float(os.environ["INPUT_USD_PER_MILLION"]),
         output_usd_per_million=float(os.environ["OUTPUT_USD_PER_MILLION"]),
+        monthly_cap_micro_usd=Limits.from_env().monthly_cap_micro_usd,
     )
 
 
@@ -100,6 +104,15 @@ def priced_ask_factory(settings: WorkerSettings, spend: SpendCounter) -> Callabl
     return lambda: make_asker(build_model(Provider.bedrock, settings.model_id), on_usage=record)
 
 
+def start_refusal(job: dict[str, Any], db: Tables, settings: WorkerSettings) -> str | None:
+    """Jobs can wait in Lambda's async queue (reserved concurrency), so the API's checks may be out of date by now."""
+    if time.time() - int(job["created_at"]) > STALE_SECONDS:
+        return WAITED_TOO_LONG_MESSAGE  # the dashboard already shows a job this old as failed
+    if db.spend.month_total() >= settings.monthly_cap_micro_usd:
+        return BUDGET_MESSAGE
+    return None
+
+
 def run_job(job_id: str, db: Tables, settings: WorkerSettings, ask_factory: Callable[[], Asker] | None = None) -> None:
     job = db.jobs.get(job_id)
     if job is None or not db.jobs.start(job_id):
@@ -107,6 +120,13 @@ def run_job(job_id: str, db: Tables, settings: WorkerSettings, ask_factory: Call
         return
 
     owner_id = job["owner_id"]
+    refusal = start_refusal(job, db, settings)
+    if refusal:
+        logger.warning("Job %s not run: %s", job_id, refusal)
+        db.jobs.fail(job_id, refusal)
+        db.usage.finish(owner_id, refund=True)
+        return
+
     options = OrganizeOptions(
         username=job["login"],
         app_auth=(settings.client_id, settings.client_secret),

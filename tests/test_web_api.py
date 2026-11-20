@@ -318,6 +318,50 @@ def test_failed_worker_start_gives_the_week_back(monkeypatch, job_api):
     assert status == 202
 
 
+# ---------- latest job ----------
+
+
+def get_latest(user: dict = USER) -> tuple[int, dict]:
+    response = handler(event("GET /api/jobs/latest", cookies=[session_cookie_for(user)]), context=None)
+    return response["statusCode"], json.loads(response["body"])
+
+
+def test_latest_job_is_404_before_the_first_run(job_api):
+    status, body = get_latest()
+
+    assert (status, body["error"]) == (404, "no runs yet")
+
+
+def test_latest_job_returns_the_newest_run(job_api, usage_table):
+    boss = {**USER, "login": "Boss", "id": 7}
+    post_job(boss)
+    usage_table.items["7"]["active_until"] = 0
+    _, second = post_job(boss)
+
+    status, body = get_latest(boss)
+
+    assert (status, body["job_id"]) == (200, second["job_id"])
+    assert "owner_id" not in body
+
+
+def test_latest_job_shows_a_run_whose_worker_could_not_start(monkeypatch, job_api):
+    def failing_start(job_id):
+        raise ClientError({"Error": {"Code": "ServiceException", "Message": "down"}}, "Invoke")
+
+    monkeypatch.setattr(api, "start_worker", failing_start)
+    post_job()
+
+    status, body = get_latest()
+
+    assert (status, body["status"]) == (200, "failed")
+
+
+def test_latest_job_needs_a_session(job_api):
+    response = handler(event("GET /api/jobs/latest"), context=None)
+
+    assert response["statusCode"] == 401
+
+
 # ---------- trial status on /api/me ----------
 
 

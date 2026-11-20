@@ -89,6 +89,17 @@ def test_check_reports_the_limit_without_starting_a_run(usage, usage_table):
     assert usage.check("1", weekly=False, now=NOW + 60).allowed
 
 
+def test_last_job_is_remembered_and_kept_when_the_next_run_starts(usage):
+    assert usage.last_job_id("1") is None
+
+    usage.try_start("1", weekly=False, now=NOW)
+    usage.remember_job("1", "job-1")
+    usage.finish("1")
+    usage.try_start("1", weekly=False, now=NOW + 60)
+
+    assert usage.last_job_id("1") == "job-1"
+
+
 def test_finish_for_unknown_user_does_nothing(usage, usage_table):
     usage.finish("nobody")
 
