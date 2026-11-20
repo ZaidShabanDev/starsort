@@ -2,16 +2,18 @@ import { DatePipe } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
 import { Component, DOCUMENT, DestroyRef, OnInit, computed, inject, input, output, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { EMPTY, Subscription, catchError, switchMap, takeWhile, timer } from 'rxjs';
+import { Subscription } from 'rxjs';
+import { pollJob } from '../../../job-polling';
 import { ApiError, Job, StarsortApi, TrialStatus, isActive } from '../../../starsort-api';
+import { ListsPanel } from '../lists-panel/lists-panel';
 
-export const POLL_MS = 3000;
+export { POLL_MS } from '../../../job-polling';
 export const DOWNLOAD_NAME = 'awesome-stars.md';
 const START_FAILED = 'Could not start the run. Please try again.';
 
 @Component({
   selector: 'app-run-panel',
-  imports: [DatePipe],
+  imports: [DatePipe, ListsPanel],
   templateUrl: './run-panel.html',
   styleUrl: './run-panel.scss',
 })
@@ -103,12 +105,8 @@ export class RunPanel implements OnInit {
 
   private watch(jobId: string): void {
     this.polling?.unsubscribe();
-    this.polling = timer(POLL_MS, POLL_MS)
-      .pipe(
-        switchMap(() => this.api.job(jobId).pipe(catchError(() => EMPTY))), // a failed check just waits for the next one
-        takeWhile((job) => isActive(job), true),
-        takeUntilDestroyed(this.destroyRef),
-      )
+    this.polling = pollJob(this.api, jobId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((job) => {
         this.job.set(job);
         if (!isActive(job)) {
