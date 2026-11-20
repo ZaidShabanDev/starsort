@@ -201,6 +201,21 @@ a {
   background: var(--cyan);
 }
 
+// ---------- progress bar (runs and Lists syncs) ----------
+
+.progress {
+  height: 28px;
+  background: var(--surface);
+  border: var(--border);
+  box-shadow: var(--shadow-sm);
+}
+
+.progress__bar {
+  height: 100%;
+  background: var(--lime);
+  transition: width 0.3s ease;
+}
+
 // ---------- status banners (dark text on a colored fill, plus a word label so color isn't the only signal) ----------
 
 .banner {

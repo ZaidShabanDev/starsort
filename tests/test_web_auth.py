@@ -54,6 +54,40 @@ def test_exchange_code_posts_secret_and_verifier():
     assert form["code_verifier"] == ["verifier1"]
 
 
+def test_authorize_url_asks_for_a_scope_only_when_given():
+    plain = urllib.parse.parse_qs(urllib.parse.urlparse(auth.authorize_url("cid", "https://cb", "s", "c")).query)
+    lists = urllib.parse.parse_qs(urllib.parse.urlparse(auth.authorize_url("cid", "https://cb", "s", "c", scope="user")).query)
+
+    assert "scope" not in plain
+    assert lists["scope"] == ["user"]
+
+
+def test_exchange_code_and_scopes_reads_the_granted_scopes():
+    send = FakeSend({"access_token": "gho_token", "scope": "user,user:email", "token_type": "bearer"})
+
+    token, scopes = auth.exchange_code_and_scopes("cid", "csecret", "code1", "https://cb", "v", send=send)
+
+    assert (token, scopes) == ("gho_token", {"user", "user:email"})
+
+
+def test_exchange_code_and_scopes_with_no_scope_granted():
+    send = FakeSend({"access_token": "gho_token", "scope": ""})
+
+    assert auth.exchange_code_and_scopes("cid", "csecret", "c", "https://cb", "v", send=send)[1] == set()
+
+
+def test_revoke_token_deletes_it_with_the_app_credentials():
+    sent = []
+
+    auth.revoke_token("cid", "csecret", "gho_token", send=sent.append)
+
+    request = sent[0]
+    assert request.get_method() == "DELETE"
+    assert request.full_url == "https://api.github.com/applications/cid/token"
+    assert request.get_header("Authorization") == "Basic " + base64.b64encode(b"cid:csecret").decode()
+    assert request.data == b'{"access_token": "gho_token"}'
+
+
 def test_exchange_code_raises_on_github_error():
     send = FakeSend({"error": "bad_verification_code", "error_description": "The code is incorrect or expired."})
 

@@ -1,0 +1,36 @@
+.lists {
+  display: grid;
+  gap: 1rem;
+  padding-top: 1.5rem;
+  border-top: var(--border-thin);
+
+  h3,
+  p {
+    margin: 0;
+  }
+}
+
+.lists__progress {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.lists__private {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  cursor: pointer;
+
+  input {
+    width: 20px;
+    height: 20px;
+    margin: 0;
+    accent-color: var(--violet);
+    cursor: pointer;
+  }
+}
+
+.lists__hint {
+  font-size: 0.9rem;
+}

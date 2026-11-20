@@ -362,6 +362,131 @@ def test_latest_job_needs_a_session(job_api):
     assert response["statusCode"] == 401
 
 
+# ---------- GitHub Lists sync ----------
+
+
+@pytest.fixture
+def lists_api(monkeypatch, job_api):
+    """GitHub's answers for the Lists approval, plus records of revoked tokens and started syncs."""
+    calls = {"revoked": [], "syncs": [], "scopes": {"user"}, "user": dict(USER)}
+    monkeypatch.setattr(auth, "exchange_code_and_scopes", lambda *args: ("gho_lists", calls["scopes"]))
+    monkeypatch.setattr(auth, "fetch_user", lambda token: calls["user"])
+    monkeypatch.setattr(auth, "revoke_token", lambda client_id, secret, token: calls["revoked"].append(token))
+    monkeypatch.setattr(api, "start_sync_worker", lambda job_id, token, private: calls["syncs"].append((job_id, token, private)))
+    return calls
+
+
+def finished_run(usage_table, owner_id: str = "1") -> None:
+    post_job()
+    usage_table.items[owner_id]["active_until"] = 0
+
+
+def connect_lists(private: bool = False) -> tuple[str, str]:
+    """Run /api/auth/lists and return (state sent to GitHub, login cookie)."""
+    response = handler(event("GET /api/auth/lists", {"private": "1"} if private else None, [session_cookie_for(USER)]), context=None)
+    query = urllib.parse.parse_qs(urllib.parse.urlparse(response["headers"]["location"]).query)
+    return query["state"][0], cookie_pair(response["cookies"][0])
+
+
+def finish_lists(state: str, login_cookie: str, query: dict | None = None, signed_in: bool = True) -> str:
+    cookies = [login_cookie, session_cookie_for(USER)] if signed_in else [login_cookie]
+    response = handler(event("GET /api/auth/callback", query or {"code": "c1", "state": state}, cookies), context=None)
+    assert response["statusCode"] == 302
+    return response["headers"]["location"]
+
+
+def test_lists_connect_asks_github_for_the_user_scope(lists_api):
+    response = handler(event("GET /api/auth/lists", cookies=[session_cookie_for(USER)]), context=None)
+
+    query = urllib.parse.parse_qs(urllib.parse.urlparse(response["headers"]["location"]).query)
+    assert query["scope"] == ["user"]
+    assert "Path=/api/auth" in response["cookies"][0]
+
+
+def test_lists_connect_without_a_session_goes_home(settings):
+    response = handler(event("GET /api/auth/lists"), context=None)
+
+    assert (response["statusCode"], response["headers"]["location"]) == (302, "/")
+
+
+def test_lists_approval_starts_a_sync_and_never_stores_the_token(lists_api, usage_table, jobs_table):
+    finished_run(usage_table)
+
+    location = finish_lists(*connect_lists(private=True))
+
+    job_id, token, private = lists_api["syncs"][0]
+    assert location == "/dashboard?lists=started"
+    assert (token, private) == ("gho_lists", True)
+    assert lists_api["revoked"] == []  # the worker revokes it when the sync is done
+    assert jobs_table.items[job_id]["kind"] == "lists"
+    assert "gho_lists" not in json.dumps([jobs_table.items, usage_table.items], default=str)
+
+    latest = handler(event("GET /api/jobs/latest", {"kind": "lists"}, [session_cookie_for(USER)]), context=None)
+    assert json.loads(latest["body"])["job_id"] == job_id
+
+
+def test_lists_approval_with_another_github_account_is_refused(lists_api, usage_table):
+    finished_run(usage_table)
+    lists_api["user"] = {**USER, "login": "mallory", "id": 2}
+
+    location = finish_lists(*connect_lists())
+
+    assert location == "/dashboard?lists=wrong_account"
+    assert (lists_api["syncs"], lists_api["revoked"]) == ([], ["gho_lists"])
+
+
+def test_lists_approval_without_the_scope_is_refused(lists_api, usage_table):
+    finished_run(usage_table)
+    lists_api["scopes"] = set()
+
+    assert finish_lists(*connect_lists()) == "/dashboard?lists=denied"
+    assert lists_api["revoked"] == ["gho_lists"]
+
+
+def test_lists_sync_needs_a_run_first(lists_api):
+    assert finish_lists(*connect_lists()) == "/dashboard?lists=no_run"
+    assert lists_api["revoked"] == ["gho_lists"]
+
+
+def test_lists_sync_waits_for_a_running_job(lists_api):
+    post_job()
+
+    assert finish_lists(*connect_lists()) == "/dashboard?lists=busy"
+    assert lists_api["revoked"] == ["gho_lists"]
+
+
+def test_cancelled_lists_approval_changes_nothing(lists_api, usage_table):
+    finished_run(usage_table)
+    state, login_cookie = connect_lists()
+
+    location = finish_lists(state, login_cookie, {"error": "access_denied"})
+
+    assert location == "/dashboard?lists=denied"
+    assert (lists_api["syncs"], lists_api["revoked"]) == ([], [])
+
+
+def test_lists_approval_after_signing_out(lists_api, usage_table):
+    finished_run(usage_table)
+    state, login_cookie = connect_lists()
+
+    assert finish_lists(state, login_cookie, signed_in=False) == "/dashboard?lists=signed_out"
+
+
+def test_lists_sync_that_cannot_start_frees_the_slot(monkeypatch, lists_api, usage_table, jobs_table):
+    def failing_start(job_id, token, private):
+        raise ClientError({"Error": {"Code": "ServiceException", "Message": "down"}}, "Invoke")
+
+    finished_run(usage_table)
+    monkeypatch.setattr(api, "start_sync_worker", failing_start)
+
+    location = finish_lists(*connect_lists())
+
+    assert location == "/dashboard?lists=error"
+    assert lists_api["revoked"] == ["gho_lists"]
+    assert usage_table.items["1"]["active_until"] == 0
+    assert [job["status"] for job in jobs_table.items.values() if job["kind"] == "lists"] == ["failed"]
+
+
 # ---------- trial status on /api/me ----------
 
 

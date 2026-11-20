@@ -11,9 +11,10 @@ from typing import Any
 
 from botocore.exceptions import ClientError
 
-from starsort.web.jobs import STALE_SECONDS
+from starsort.web.jobs import LISTS, RUN, STALE_SECONDS
 
 WEEK_SECONDS = 7 * 24 * 60 * 60
+LAST_JOB_FIELDS = {RUN: "last_job_id", LISTS: "last_sync_id"}
 BUDGET_MESSAGE = "The free trial is paused until next month: this month's AI budget is used up."
 
 
@@ -37,7 +38,7 @@ class Limits:
 @dataclass(frozen=True)
 class StartCheck:
     allowed: bool
-    reason: str | None = None  # "running" or "weekly"
+    reason: str | None = None  # "running", "weekly", or "no_run" (a Lists sync before any run)
     retry_at: int | None = None  # Unix seconds when a new run is allowed
 
 
@@ -90,8 +91,9 @@ class UsageStore:
             "previous_started_at": last_started,  # put back if the run fails, so a failure doesn't use up the week
             "active_until": now + STALE_SECONDS,
         }
-        if item and "last_job_id" in item:
-            row["last_job_id"] = item["last_job_id"]
+        for field in LAST_JOB_FIELDS.values():
+            if item and field in item:
+                row[field] = item[field]
         # Only write if the row is still what we just read: two clicks at the same moment can't both start.
         if item is None:
             condition: dict[str, Any] = {"ConditionExpression": "attribute_not_exists(owner_id)"}
@@ -109,19 +111,42 @@ class UsageStore:
             raise
         return StartCheck(True)
 
-    def remember_job(self, owner_id: str, job_id: str) -> None:
-        """So GET /api/jobs/latest can find the run after a page refresh or on another device."""
+    def try_start_sync(self, owner_id: str, now: float | None = None) -> StartCheck:
+        """A Lists sync uses no AI, so it skips the weekly limit, but still only one job may run at a time."""
+        now = int(time.time() if now is None else now)
+        item = self.table.get_item(Key={"owner_id": owner_id}).get("Item")
+        if item is None:
+            return StartCheck(False, "no_run")  # never started a run, so there are no categories to sync
+        check = _start_check(item, weekly=False, now=now)
+        if not check.allowed:
+            return check
+        try:
+            self.table.update_item(
+                Key={"owner_id": owner_id},
+                UpdateExpression="SET #active = :until",
+                ConditionExpression="#active = :active",
+                ExpressionAttributeNames={"#active": "active_until"},
+                ExpressionAttributeValues={":until": now + STALE_SECONDS, ":active": item["active_until"]},
+            )
+        except ClientError as error:
+            if _condition_failed(error):
+                return StartCheck(False, "running", now + STALE_SECONDS)
+            raise
+        return StartCheck(True)
+
+    def remember_job(self, owner_id: str, job_id: str, kind: str = RUN) -> None:
+        """So GET /api/jobs/latest can find the job after a page refresh or on another device."""
         self.table.update_item(
             Key={"owner_id": owner_id},
             UpdateExpression="SET #job = :job",
             ConditionExpression="attribute_exists(owner_id)",
-            ExpressionAttributeNames={"#job": "last_job_id"},
+            ExpressionAttributeNames={"#job": LAST_JOB_FIELDS[kind]},
             ExpressionAttributeValues={":job": job_id},
         )
 
-    def last_job_id(self, owner_id: str) -> str | None:
+    def last_job_id(self, owner_id: str, kind: str = RUN) -> str | None:
         item = self.table.get_item(Key={"owner_id": owner_id}).get("Item")
-        return item.get("last_job_id") if item else None
+        return item.get(LAST_JOB_FIELDS[kind]) if item else None
 
     def finish(self, owner_id: str, refund: bool = False) -> None:
         item = self.table.get_item(Key={"owner_id": owner_id}).get("Item")

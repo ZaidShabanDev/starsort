@@ -12,12 +12,15 @@ from starsort.web.limits import BUDGET_MESSAGE, SpendCounter, UsageStore
 from starsort.web.worker import (
     FAILED_MESSAGE,
     MAX_STARS,
+    NO_CATEGORIES_MESSAGE,
+    SYNC_FAILED_MESSAGE,
     WAITED_TOO_LONG_MESSAGE,
     DynamoCacheStore,
     Tables,
     WorkerSettings,
     priced_ask_factory,
     run_job,
+    run_sync,
 )
 
 SETTINGS = WorkerSettings(
@@ -211,6 +214,173 @@ def test_priced_asker_adds_every_call_to_the_spend_counter(monkeypatch, db):
     seen["on_usage"](0, 100_000)
 
     assert db.spend.month_total() == 3_300_000 + 1_650_000
+
+
+# ---------- GitHub Lists sync ----------
+
+
+class FakeListsGitHub:
+    """Stands in for GitHubGraphQL inside sync_github_lists."""
+
+    login = "octo"
+
+    restricted: set[str] = set()
+
+    def __init__(self, token: str):
+        self.token = token
+        self.created: list[tuple[str, bool]] = []
+        self.updates: list[tuple[str, list[str]]] = []
+        self.restricted_orgs = set(self.restricted)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        pass
+
+    def viewer_login(self):
+        return self.login
+
+    def fetch_lists(self):
+        return []
+
+    def create_list(self, name, private=False):
+        self.created.append((name, private))
+        return f"L-{name}"
+
+    def set_lists_for_item(self, item_id, list_ids):
+        self.updates.append((item_id, list_ids))
+
+
+@pytest.fixture
+def lists_github(monkeypatch) -> list[FakeListsGitHub]:
+    made: list[FakeListsGitHub] = []
+
+    def connect(token):
+        made.append(FakeListsGitHub(token))
+        return made[-1]
+
+    monkeypatch.setattr("starsort.service.GitHubGraphQL", connect)
+    return made
+
+
+def save_categories(db: Tables) -> None:
+    repos = [
+        Repo(full_name="a/agent", url="https://github.com/a/agent", node_id="R1", updated_at=datetime(2026, 1, 1, tzinfo=timezone.utc)),
+        Repo(full_name="b/bot", url="https://github.com/b/bot", node_id="R2", updated_at=datetime(2026, 1, 1, tzinfo=timezone.utc)),
+    ]
+    cache = StarCache(username="octo", fetched_at=datetime.now(timezone.utc), repos=repos, categories={"a/agent": "AI", "b/bot": "Other"})
+    DynamoCacheStore(db.stars, "1").save(cache)
+
+
+def sync_job(db: Tables) -> str:
+    """What the API does after the user approves: a finished run exists, then the sync takes the running slot."""
+    db.usage.try_start("1", weekly=False)
+    db.usage.finish("1")
+    db.usage.try_start_sync("1")
+    return db.jobs.create("1", "octo", kind=jobs.LISTS)["job_id"]
+
+
+def sync(db: Tables, job_id: str, revoked: list[str], private: bool = False) -> None:
+    run_sync(job_id, "gho_lists", private, db, SETTINGS, pause=lambda: None, revoke=revoked.append)
+
+
+def test_sync_copies_categories_to_lists_then_revokes_the_token(lists_github, db):
+    save_categories(db)
+    job_id = sync_job(db)
+    revoked: list[str] = []
+
+    sync(db, job_id, revoked, private=True)
+
+    job = db.jobs.get(job_id)
+    assert lists_github[0].token == "gho_lists"
+    assert lists_github[0].created == [("AI", True)]  # "Other" never gets a list
+    assert lists_github[0].updates == [("R1", ["L-AI"])]
+    assert (job["status"], job["lists_created"], job["repos_updated"], job["repos_to_update"]) == (jobs.DONE, 1, 1, 1)
+    assert revoked == ["gho_lists"]
+    assert db.usage.try_start("1", weekly=False).allowed  # the running slot is free again
+
+
+def test_sync_skips_repos_of_an_org_that_blocks_the_app(monkeypatch, lists_github, db):
+    monkeypatch.setattr(FakeListsGitHub, "restricted", {"a"})
+    save_categories(db)
+    job_id = sync_job(db)
+    revoked: list[str] = []
+
+    sync(db, job_id, revoked)
+
+    job = db.jobs.get(job_id)
+    assert lists_github[0].updates == []
+    assert (job["status"], job["repos_skipped"], job["skipped_orgs"], job["complete"]) == (jobs.DONE, 1, ["a"], True)
+    assert revoked == ["gho_lists"]
+
+
+def test_sync_for_another_github_account_fails_and_still_revokes(monkeypatch, lists_github, db):
+    monkeypatch.setattr(FakeListsGitHub, "login", "mallory")
+    save_categories(db)
+    job_id = sync_job(db)
+    revoked: list[str] = []
+
+    sync(db, job_id, revoked)
+
+    assert db.jobs.get(job_id)["status"] == jobs.FAILED
+    assert "your own account" in db.jobs.get(job_id)["error"]
+    assert revoked == ["gho_lists"]
+
+
+def test_sync_without_categories_fails_with_a_clear_message(lists_github, db):
+    job_id = sync_job(db)
+    revoked: list[str] = []
+
+    sync(db, job_id, revoked)
+
+    assert db.jobs.get(job_id)["error"] == NO_CATEGORIES_MESSAGE
+    assert (lists_github, revoked) == ([], ["gho_lists"])
+
+
+def test_unexpected_sync_error_shows_a_safe_message(monkeypatch, lists_github, db):
+    def broken(token):
+        raise RuntimeError("internal details")
+
+    monkeypatch.setattr("starsort.service.GitHubGraphQL", broken)
+    save_categories(db)
+    job_id = sync_job(db)
+    revoked: list[str] = []
+
+    sync(db, job_id, revoked)
+
+    assert db.jobs.get(job_id)["error"] == SYNC_FAILED_MESSAGE
+    assert revoked == ["gho_lists"]
+
+
+def test_sync_that_waited_too_long_is_not_run(lists_github, db, jobs_table):
+    save_categories(db)
+    job_id = sync_job(db)
+    jobs_table.items[job_id]["created_at"] -= STALE_SECONDS + 1
+    revoked: list[str] = []
+
+    sync(db, job_id, revoked)
+
+    assert db.jobs.get(job_id)["error"] == WAITED_TOO_LONG_MESSAGE
+    assert (lists_github, revoked) == ([], ["gho_lists"])
+
+
+def test_a_started_sync_is_not_run_again_or_revoked_twice(lists_github, db):
+    job_id = sync_job(db)
+    db.jobs.start(job_id)
+    revoked: list[str] = []
+
+    sync(db, job_id, revoked)
+
+    assert (lists_github, revoked) == ([], [])
+
+
+def test_sync_for_an_unknown_job_still_revokes_the_token(db):
+    revoked: list[str] = []
+
+    sync(db, "nope", revoked)
+
+    assert revoked == ["gho_lists"]
 
 
 def test_cache_store_round_trip_is_gzipped(stars_table):

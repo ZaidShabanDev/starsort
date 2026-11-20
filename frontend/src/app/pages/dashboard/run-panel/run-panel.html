@@ -69,5 +69,7 @@
     </div>
 
     <pre class="result__markdown" tabindex="0" aria-label="Markdown of your awesome list">{{ current.markdown }}</pre>
+
+    <app-lists-panel (syncEnded)="trialChanged.emit()" />
   </section>
 }

@@ -62,7 +62,14 @@ describe('RunPanel', () => {
       request.flush({ error: 'no runs yet' }, NOT_FOUND);
     }
     fixture.detectChanges();
+    answerListsPanel();
     return fixture.nativeElement as HTMLElement;
+  }
+
+  /** A finished run shows the Lists panel, which asks for the last sync. */
+  function answerListsPanel(): void {
+    http.match('/api/jobs/latest?kind=lists').forEach((request) => request.flush({ error: 'no runs yet' }, NOT_FOUND));
+    fixture.detectChanges();
   }
 
   function button(page: HTMLElement, text: string): HTMLButtonElement | undefined {
@@ -73,6 +80,7 @@ describe('RunPanel', () => {
     vi.advanceTimersByTime(POLL_MS);
     http.expectOne('/api/jobs/j1').flush(answer);
     fixture.detectChanges();
+    answerListsPanel();
   }
 
   it('lets a user start the first run', () => {
@@ -146,6 +154,12 @@ describe('RunPanel', () => {
     const page = render(READY, job({ status: 'failed', error: "GitHub user 'octo' was not found." }));
 
     expect(page.querySelector('[role="alert"]')?.textContent).toContain('was not found');
+  });
+
+  it('offers the GitHub Lists sync under a finished run', () => {
+    const page = render(READY, DONE);
+
+    expect(page.querySelector('app-lists-panel')).not.toBeNull();
   });
 
   it('copies the markdown', () => {

@@ -1,4 +1,5 @@
-from collections.abc import Callable
+import re
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 
 import httpx
@@ -7,6 +8,7 @@ from starsort.github import API_URL, build_headers
 from starsort.models import OTHER_CATEGORY
 
 MANAGED_MARKER = "Managed by starsort"
+RESTRICTED_ORG = re.compile(r"the `([^`]+)` organization has enabled OAuth App access restrictions")
 
 VIEWER_QUERY = "query { viewer { login } }"
 
@@ -41,8 +43,8 @@ query($id: ID!, $after: String) {
 }"""
 
 CREATE_LIST_MUTATION = """
-mutation($name: String!, $description: String!) {
-  createUserList(input: {name: $name, description: $description, isPrivate: false}) {
+mutation($name: String!, $description: String!, $isPrivate: Boolean!) {
+  createUserList(input: {name: $name, description: $description, isPrivate: $isPrivate}) {
     list { id }
   }
 }"""
@@ -57,6 +59,29 @@ mutation($itemId: ID!, $listIds: [ID!]!) {
 
 class ListsError(Exception):
     pass
+
+
+class RateLimitedError(ListsError):
+    """GitHub's secondary rate limit (about 80 changes a minute, 500 an hour). Stop and continue in a later sync."""
+
+
+class OrgRestrictedError(ListsError):
+    """An organization blocks unapproved OAuth Apps (e.g. awslabs), so the web app can't touch its repos."""
+
+    def __init__(self, orgs: set[str]):
+        super().__init__(f"GitHub: the {', '.join(sorted(orgs))} organization blocks apps like Starsort.")
+        self.orgs = orgs
+
+
+def _restricted_orgs(errors: list[dict]) -> set[str]:
+    """Orgs named by OAuth App access-restriction errors; empty if any error is something else."""
+    orgs = set()
+    for error in errors:
+        match = RESTRICTED_ORG.search(error.get("message", ""))
+        if not match:
+            return set()
+        orgs.add(match.group(1).lower())
+    return orgs
 
 
 @dataclass
@@ -83,6 +108,19 @@ class RepoChange:
 class SyncPlan:
     lists_to_create: list[str]
     changes: list[RepoChange]
+
+
+@dataclass(frozen=True)
+class SyncResult:
+    lists_created: int
+    repos_updated: int
+    repos_to_update: int  # what the plan needed; more than updated + skipped when the sync stopped early
+    repos_skipped: int = 0  # repos of organizations that block OAuth Apps
+    skipped_orgs: tuple[str, ...] = ()
+
+    @property
+    def complete(self) -> bool:
+        return self.repos_updated + self.repos_skipped == self.repos_to_update
 
 
 def plan_sync(lists: list[StarList], assignments: dict[str, str], node_ids: dict[str, str]) -> SyncPlan:
@@ -117,6 +155,7 @@ class GitHubGraphQL:
         self.token = token
         self.owns_client = client is None
         self.client = client or httpx.Client(base_url=API_URL, timeout=30)
+        self.restricted_orgs: set[str] = set()  # orgs whose repos were hidden from fetch_lists
 
     def __enter__(self) -> "GitHubGraphQL":
         return self
@@ -125,16 +164,27 @@ class GitHubGraphQL:
         if self.owns_client:
             self.client.close()
 
-    def run(self, query: str, variables: dict | None = None) -> dict:
+    def run(self, query: str, variables: dict | None = None, partial_ok: bool = False) -> dict:
+        """partial_ok: keep the data when the only errors are orgs blocking OAuth Apps (their repos come back as null)."""
         response = self.client.post(
             "/graphql", json={"query": query, "variables": variables or {}}, headers=build_headers(self.token)
         )
         if response.status_code == 401:
-            raise ListsError("GitHub rejected GITHUB_TOKEN (401). Check that the token is valid.")
+            raise ListsError("GitHub rejected the token (401). Check that it is valid (the CLI reads GITHUB_TOKEN).")
+        if response.status_code in (403, 429) and "rate limit" in response.text.lower():
+            raise RateLimitedError(f"GitHub's rate limit was reached (HTTP {response.status_code}): {response.text[:300]}")
         if response.is_error:
             raise ListsError(f"GitHub GraphQL error {response.status_code}: {response.text[:200]}")
         body = response.json()
         if body.get("errors"):  # GraphQL reports most errors with HTTP 200
+            if any(error.get("type") == "RATE_LIMITED" for error in body["errors"]):
+                raise RateLimitedError(f"GitHub's rate limit was reached: {body['errors']}"[:400])
+            orgs = _restricted_orgs(body["errors"])
+            if orgs and partial_ok and body.get("data"):
+                self.restricted_orgs |= orgs
+                return body["data"]
+            if orgs:
+                raise OrgRestrictedError(orgs)
             message = "; ".join(error.get("message", "unknown error") for error in body["errors"])
             if "not accessible by personal access token" in message:
                 message += ". Star lists need a classic token with the 'user' scope (fine-grained tokens can't create lists)."
@@ -148,8 +198,10 @@ class GitHubGraphQL:
         lists: list[StarList] = []
         after = None
         while True:
-            page = self.run(LISTS_QUERY, {"after": after})["viewer"]["lists"]
+            page = self.run(LISTS_QUERY, {"after": after}, partial_ok=True)["viewer"]["lists"]
             for node in page["nodes"]:
+                if not node:
+                    continue
                 star_list = StarList(id=node["id"], name=node["name"], description=node.get("description"))
                 star_list.item_ids = self._collect_item_ids(node["id"], node["items"])
                 lists.append(star_list)
@@ -164,10 +216,10 @@ class GitHubGraphQL:
             if not items_page["pageInfo"]["hasNextPage"]:
                 return ids
             after = items_page["pageInfo"]["endCursor"]
-            items_page = self.run(LIST_ITEMS_QUERY, {"id": list_id, "after": after})["node"]["items"]
+            items_page = self.run(LIST_ITEMS_QUERY, {"id": list_id, "after": after}, partial_ok=True)["node"]["items"]
 
-    def create_list(self, name: str) -> str:
-        data = self.run(CREATE_LIST_MUTATION, {"name": name, "description": MANAGED_MARKER})
+    def create_list(self, name: str, private: bool = False) -> str:
+        data = self.run(CREATE_LIST_MUTATION, {"name": name, "description": MANAGED_MARKER, "isPrivate": private})
         return data["createUserList"]["list"]["id"]
 
     def set_lists_for_item(self, item_id: str, list_ids: list[str]) -> None:
@@ -179,18 +231,66 @@ def apply_sync(
     plan: SyncPlan,
     lists: list[StarList],
     on_step: Callable[[str], None] | None = None,
-) -> None:
+    *,
+    private: bool = False,
+    max_changes: int | None = None,
+    pause: Callable[[], None] | None = None,
+    on_progress: Callable[[int, int], None] | None = None,
+    skip_owners: Iterable[str] = (),
+) -> SyncResult:
+    """Apply the plan, at most max_changes repos. Stops cleanly on GitHub's rate limit; the next sync continues.
+    Repos of orgs that block OAuth Apps are skipped: their lists can't be read, so a change could drop the user's own lists."""
     list_ids = {star_list.name.lower(): star_list.id for star_list in lists}
-    for name in plan.lists_to_create:
-        list_ids[name.lower()] = client.create_list(name)
-        if on_step:
-            on_step(f"created list: {name}")
+    total = len(plan.changes)
+    created = updated = skipped = 0
+    blocked = {owner.lower() for owner in skip_owners}
+    skipped_orgs: set[str] = set()
+    mutations = 0
 
-    for change in plan.changes:
-        # updateUserListsForItem REPLACES the repo's lists, so send the user's own lists back too.
-        ids = set(change.keep_list_ids)
-        if change.target:
-            ids.add(list_ids[change.target.lower()])
-        client.set_lists_for_item(change.node_id, sorted(ids))
+    def before_mutation() -> None:
+        nonlocal mutations
+        if pause and mutations:
+            pause()
+        mutations += 1
+
+    try:
+        for name in plan.lists_to_create:
+            before_mutation()
+            list_ids[name.lower()] = client.create_list(name, private=private)
+            created += 1
+            if on_step:
+                on_step(f"created list: {name}")
+
+        for change in plan.changes[:max_changes]:
+            owner = change.full_name.split("/")[0].lower()
+            if owner in blocked:
+                skipped += 1
+                skipped_orgs.add(owner)
+            else:
+                before_mutation()
+                # updateUserListsForItem REPLACES the repo's lists, so send the user's own lists back too.
+                ids = set(change.keep_list_ids)
+                if change.target:
+                    ids.add(list_ids[change.target.lower()])
+                try:
+                    client.set_lists_for_item(change.node_id, sorted(ids))
+                except OrgRestrictedError as error:
+                    skipped += 1
+                    skipped_orgs |= error.orgs
+                    blocked |= error.orgs
+                else:
+                    updated += 1
+                    if on_step:
+                        on_step(f"{change.full_name} -> {change.target or '(removed from starsort lists)'}")
+            if on_progress:
+                on_progress(updated + skipped, total)
+    except RateLimitedError as error:
         if on_step:
-            on_step(f"{change.full_name} -> {change.target or '(removed from starsort lists)'}")
+            on_step(f"stopped early: {error}")
+    return SyncResult(
+        lists_created=created,
+        repos_updated=updated,
+        repos_to_update=total,
+        repos_skipped=skipped,
+        skipped_orgs=tuple(sorted(skipped_orgs)),
+    )

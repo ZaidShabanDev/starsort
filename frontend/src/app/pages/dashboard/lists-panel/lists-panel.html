@@ -1,0 +1,70 @@
+@let current = sync();
+
+<section class="lists" aria-labelledby="lists-title">
+  <h3 id="lists-title">Sync to your GitHub Lists</h3>
+  <p>
+    Puts each repo into a star List on your GitHub profile, named after its category.
+    Your own lists are never changed, and "Other" gets no list.
+  </p>
+
+  @if (current && active()) {
+    <div class="lists__progress" role="status">
+      @if (current.batches_total === 0) {
+        <p><strong>Reading your lists on GitHub…</strong></p>
+      } @else {
+        <p><strong>Updating your lists:</strong> {{ current.batches_done }} of {{ current.batches_total }} repos</p>
+      }
+      <div
+        class="progress"
+        role="progressbar"
+        aria-label="Sync progress"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        [attr.aria-valuenow]="percent()"
+      >
+        <div class="progress__bar" [style.width.%]="percent()"></div>
+      </div>
+    </div>
+  } @else {
+    <label class="lists__private">
+      <input type="checkbox" [checked]="makePrivate()" (change)="setPrivate($event)">
+      Make new lists private
+    </label>
+    <div>
+      <a class="btn btn--plain" [href]="connectUrl()">Sync to my GitHub Lists</a>
+    </div>
+    <p class="lists__hint">
+      GitHub will ask you to let Starsort edit your profile. Starsort only uses that to update your star lists,
+      and cancels its access token as soon as the sync ends. You can remove Starsort any time on GitHub under
+      Settings → Applications.
+    </p>
+  }
+
+  @if (notice(); as message) {
+    <p class="banner" data-tone="stop" role="alert"><strong>Not synced.</strong> {{ message }}</p>
+  }
+
+  @if (current && current.status === 'done') {
+    @if (current.repos_to_update === 0 && current.lists_created === 0) {
+      <p class="banner" data-tone="ok"><strong>Up to date.</strong> Your GitHub Lists already match your categories.</p>
+    } @else if (complete()) {
+      <p class="banner" data-tone="ok">
+        <strong>Done.</strong> Created {{ current.lists_created }} lists and updated {{ current.repos_updated }} repos on GitHub.
+      </p>
+    } @else {
+      <p class="banner" data-tone="wait">
+        <strong>Partly done.</strong> Updated {{ current.repos_updated }} of {{ current.repos_to_update }} repos.
+        GitHub limits how fast lists can change, so click Sync again in about an hour to finish.
+      </p>
+    }
+    @if (current.repos_skipped) {
+      <p class="banner" data-tone="wait">
+        <strong>Skipped {{ current.repos_skipped }} repos</strong> from {{ current.skipped_orgs?.join(', ') }}.
+        That organization blocks outside apps like Starsort, so those repos were left as they are.
+        The starsort command-line tool with your own GitHub token can still sort them.
+      </p>
+    }
+  } @else if (current && current.status === 'failed') {
+    <p class="banner" data-tone="stop" role="alert"><strong>The last sync failed.</strong> {{ current.error }}</p>
+  }
+</section>

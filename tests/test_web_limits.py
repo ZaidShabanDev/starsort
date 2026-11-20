@@ -100,6 +100,36 @@ def test_last_job_is_remembered_and_kept_when_the_next_run_starts(usage):
     assert usage.last_job_id("1") == "job-1"
 
 
+def test_sync_needs_a_run_first(usage):
+    assert usage.try_start_sync("1", now=NOW).reason == "no_run"
+
+
+def test_sync_does_not_use_up_the_week(usage, usage_table):
+    usage.try_start("1", now=NOW)
+    usage.finish("1")
+    week_started = usage_table.items["1"]["last_started_at"]
+
+    assert usage.try_start_sync("1", now=NOW + 60).allowed
+    assert usage_table.items["1"]["last_started_at"] == week_started
+
+
+def test_sync_waits_for_a_running_job_and_blocks_a_run_while_it_runs(usage):
+    usage.try_start("1", weekly=False, now=NOW)
+    assert usage.try_start_sync("1", now=NOW + 60).reason == "running"
+
+    usage.finish("1")
+    usage.try_start_sync("1", now=NOW + 120)
+    assert usage.try_start("1", weekly=False, now=NOW + 180).reason == "running"
+
+
+def test_last_sync_is_remembered_apart_from_the_last_run(usage):
+    usage.try_start("1", weekly=False, now=NOW)
+    usage.remember_job("1", "run-1")
+    usage.remember_job("1", "sync-1", kind="lists")
+
+    assert (usage.last_job_id("1"), usage.last_job_id("1", kind="lists")) == ("run-1", "sync-1")
+
+
 def test_finish_for_unknown_user_does_nothing(usage, usage_table):
     usage.finish("nobody")
 

@@ -15,20 +15,28 @@ RUNNING = "running"
 DONE = "done"
 FAILED = "failed"
 
+RUN = "run"  # sort the stars with AI
+LISTS = "lists"  # copy the categories to the user's GitHub star Lists
+
 KEEP_SECONDS = 30 * 24 * 60 * 60  # DynamoDB TTL deletes a job this long after it was created
 STALE_SECONDS = 20 * 60  # longer than the worker's 15-minute Lambda limit, so a job this quiet has died
 RESULT_FIELDS = ("markdown", "categories", "repo_count", "new_repo_count")
-PUBLIC_FIELDS = ("job_id", "login", "status", "created_at", "updated_at", "batches_done", "batches_total", "error", *RESULT_FIELDS)
+SYNC_FIELDS = ("lists_created", "repos_updated", "repos_to_update", "repos_skipped", "skipped_orgs", "complete")
+PUBLIC_FIELDS = (
+    "job_id", "kind", "login", "status", "created_at", "updated_at", "batches_done", "batches_total", "error",
+    *RESULT_FIELDS, *SYNC_FIELDS,
+)
 
 
 class JobStore:
     def __init__(self, table: Any):
         self.table = table
 
-    def create(self, owner_id: str, login: str, now: float | None = None) -> dict[str, Any]:
+    def create(self, owner_id: str, login: str, now: float | None = None, kind: str = RUN) -> dict[str, Any]:
         now = int(time.time() if now is None else now)
         job = {
             "job_id": secrets.token_urlsafe(16),
+            "kind": kind,
             "owner_id": owner_id,
             "login": login,
             "status": QUEUED,
@@ -53,6 +61,9 @@ class JobStore:
 
     def finish(self, job_id: str, result: dict[str, Any]) -> None:
         self._update(job_id, {**{field: result[field] for field in RESULT_FIELDS}, "status": DONE})
+
+    def finish_sync(self, job_id: str, result: dict[str, Any]) -> None:
+        self._update(job_id, {**{field: result[field] for field in SYNC_FIELDS}, "status": DONE})
 
     def fail(self, job_id: str, message: str) -> None:
         self._update(job_id, {"status": FAILED, "error": message})

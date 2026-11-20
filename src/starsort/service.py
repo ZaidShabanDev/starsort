@@ -12,7 +12,7 @@ from typing import Protocol
 from starsort.cache import StarCache, load_cache, merge_repos, save_cache
 from starsort.categorizer import Asker, group_assignments, group_by_language, uncategorized, update_assignments
 from starsort.github import AppAuth, fetch_starred
-from starsort.github_lists import GitHubGraphQL, ListsError, SyncPlan, apply_sync, plan_sync
+from starsort.github_lists import GitHubGraphQL, ListsError, SyncResult, apply_sync, plan_sync
 from starsort.markdown import render_markdown
 from starsort.models import Repo
 from starsort.providers import DEFAULT_MODELS, Provider, build_model, make_asker
@@ -131,7 +131,12 @@ def sync_github_lists(
     categories: dict[str, list[Repo]],
     dry_run: bool = False,
     log: Log = _quiet,
-) -> SyncPlan:
+    *,
+    private: bool = False,
+    max_changes: int | None = None,
+    pause: Callable[[], None] | None = None,
+    on_progress: OnBatch | None = None,
+) -> SyncResult:
     with GitHubGraphQL(token) as github:
         login = github.viewer_login()
         if login.lower() != username.lower():
@@ -142,10 +147,11 @@ def sync_github_lists(
         assignments = {repo.full_name: name for name, group in categories.items() for repo in group}
         node_ids = {repo.full_name: repo.node_id for repo in repos if repo.node_id}
         plan = plan_sync(lists, assignments, node_ids)
+        unchanged = SyncResult(lists_created=0, repos_updated=0, repos_to_update=len(plan.changes))
 
         if not plan.lists_to_create and not plan.changes:
             log("GitHub Lists are already up to date.")
-            return plan
+            return unchanged
         log(f"GitHub Lists: {len(plan.lists_to_create)} to create, {len(plan.changes)} repos to update.")
         for name in plan.lists_to_create:
             log(f"  + list: {name}")
@@ -153,8 +159,23 @@ def sync_github_lists(
             log(f"  {change.full_name} -> {change.target or '(removed from starsort lists)'}")
         if dry_run:
             log("Dry run: nothing was changed on GitHub.")
-            return plan
+            return unchanged
 
-        apply_sync(github, plan, lists, on_step=lambda step: log(f"  done: {step}"))
-        log("GitHub Lists updated.")
-        return plan
+        result = apply_sync(
+            github,
+            plan,
+            lists,
+            on_step=lambda step: log(f"  done: {step}"),
+            private=private,
+            max_changes=max_changes,
+            pause=pause,
+            on_progress=on_progress,
+            skip_owners=github.restricted_orgs,
+        )
+        if result.repos_skipped:
+            log(f"Skipped {result.repos_skipped} repos from {', '.join(result.skipped_orgs)}: the organization blocks apps like starsort.")
+        if result.complete:
+            log("GitHub Lists updated.")
+        else:
+            log(f"Stopped after {result.repos_updated} of {result.repos_to_update} repos: GitHub limits how fast lists can change. Run again later to finish.")
+        return result
