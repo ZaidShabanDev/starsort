@@ -226,6 +226,7 @@ class FakeListsGitHub:
     login = "octo"
 
     restricted: set[str] = set()
+    hidden: set[str] = set()  # blocking orgs found only by check_repo_access (their repos aren't in any list yet)
     existing: list[StarList] = []
 
     def __init__(self, token: str):
@@ -246,6 +247,9 @@ class FakeListsGitHub:
 
     def fetch_lists(self):
         return list(self.existing)
+
+    def check_repo_access(self, node_ids):
+        self.restricted_orgs |= self.hidden
 
     def delete_list(self, list_id):
         self.deleted.append(list_id)
@@ -330,6 +334,18 @@ def test_sync_skips_repos_of_an_org_that_blocks_the_app(monkeypatch, lists_githu
     assert lists_github[0].updates == []
     assert (job["status"], job["repos_skipped"], job["skipped_orgs"], job["complete"]) == (jobs.DONE, 1, ["a"], True)
     assert revoked == ["gho_lists"]
+
+
+def test_sync_creates_no_list_for_repos_of_a_blocking_org_found_up_front(monkeypatch, lists_github, db):
+    monkeypatch.setattr(FakeListsGitHub, "hidden", {"a"})
+    save_categories(db)
+    job_id = sync_job(db)
+
+    sync(db, job_id, [])
+
+    job = db.jobs.get(job_id)
+    assert (lists_github[0].created, lists_github[0].updates) == ([], [])
+    assert (job["lists_created"], job["repos_skipped"], job["skipped_orgs"]) == (0, 1, ["a"])
 
 
 def test_sync_for_another_github_account_fails_and_still_revokes(monkeypatch, lists_github, db):

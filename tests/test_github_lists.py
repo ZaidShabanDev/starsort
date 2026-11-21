@@ -337,6 +337,31 @@ def test_fetch_lists_keeps_what_it_can_read_when_an_org_blocks_the_app():
     assert github.restricted_orgs == {"awslabs"}
 
 
+def test_check_repo_access_finds_blocking_orgs_100_repos_at_a_time():
+    sent = []
+
+    def handler(request):
+        ids = json.loads(request.content)["variables"]["ids"]
+        sent.append(len(ids))
+        return httpx.Response(200, json={"data": {"nodes": [None] * len(ids)}, "errors": [{"type": "FORBIDDEN", "message": RESTRICTED}]})
+
+    with graphql_client(handler) as github:
+        github.check_repo_access([f"R{n}" for n in range(150)])
+
+    assert sent == [100, 50]
+    assert github.restricted_orgs == {"awslabs"}
+
+
+def test_check_repo_access_ignores_other_errors():
+    def handler(request):
+        return httpx.Response(200, json={"data": {"nodes": [None]}, "errors": [{"type": "NOT_FOUND", "message": "Could not resolve to a node"}]})
+
+    with graphql_client(handler) as github:
+        github.check_repo_access(["R-deleted"])
+
+    assert github.restricted_orgs == set()
+
+
 def test_delete_list_sends_the_list_id():
     sent = []
 
