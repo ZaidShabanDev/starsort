@@ -98,7 +98,21 @@ describe('ListsPanel', () => {
     );
 
     expect(page.textContent).toContain('updated 5 repos on GitHub');
-    expect(page.textContent).toContain('Skipped 2 repos from awslabs');
+    expect(page.textContent).toContain('2 repos from awslabs were left as they are');
+    expect(page.textContent).toContain('this organization blocks');
+  });
+
+  it('is up to date when the only repos left are in blocking organizations', () => {
+    const page = render(
+      sync({
+        status: 'done', lists_created: 0, repos_updated: 0, repos_to_update: 4, repos_skipped: 4,
+        skipped_orgs: ['awslabs', 'hkuds'], complete: true,
+      }),
+    );
+
+    expect(page.textContent).toContain('already match your categories');
+    expect(page.textContent).toContain('these organizations block');
+    expect(page.querySelector('.banner[data-tone="wait"]')).toBeNull();
   });
 
   it('says how many empty lists were removed', () => {

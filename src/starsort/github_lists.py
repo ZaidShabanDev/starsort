@@ -42,6 +42,13 @@ query($id: ID!, $after: String) {
   }
 }"""
 
+REPOS_QUERY = """
+query($ids: [ID!]!) {
+  nodes(ids: $ids) {
+    ... on Repository { id }
+  }
+}"""
+
 CREATE_LIST_MUTATION = """
 mutation($name: String!, $description: String!, $isPrivate: Boolean!) {
   createUserList(input: {name: $name, description: $description, isPrivate: $isPrivate}) {
@@ -179,7 +186,7 @@ class GitHubGraphQL:
         self.token = token
         self.owns_client = client is None
         self.client = client or httpx.Client(base_url=API_URL, timeout=30)
-        self.restricted_orgs: set[str] = set()  # orgs whose repos were hidden from fetch_lists
+        self.restricted_orgs: set[str] = set()  # orgs whose repos GitHub hid from fetch_lists or check_repo_access
 
     def __enter__(self) -> "GitHubGraphQL":
         return self
@@ -247,6 +254,16 @@ class GitHubGraphQL:
                 return ids, others
             after = items_page["pageInfo"]["endCursor"]
             items_page = self.run(LIST_ITEMS_QUERY, {"id": list_id, "after": after}, partial_ok=True)["node"]["items"]
+
+    def check_repo_access(self, node_ids: list[str]) -> None:
+        """Reads the repos a sync is about to move, so blocking orgs land in restricted_orgs before any list is created."""
+        for start in range(0, len(node_ids), 100):
+            try:
+                self.run(REPOS_QUERY, {"ids": node_ids[start : start + 100]}, partial_ok=True)
+            except RateLimitedError:
+                raise
+            except ListsError:
+                pass  # best effort (e.g. a deleted repo): apply_sync still skips a repo GitHub refuses
 
     def create_list(self, name: str, private: bool = False) -> str:
         data = self.run(CREATE_LIST_MUTATION, {"name": name, "description": MANAGED_MARKER, "isPrivate": private})

@@ -1,0 +1,63 @@
+{
+  "model": "us.anthropic.claude-sonnet-4-6",
+  "judge_model": "us.anthropic.claude-sonnet-4-6",
+  "run_at": "2026-11-21T18:22:05+00:00",
+  "results": [
+    {
+      "case": "one batch",
+      "check": "coverage",
+      "score": 1.0,
+      "passed": true,
+      "reason": "missing: none; in Other: none"
+    },
+    {
+      "case": "one batch",
+      "check": "category count",
+      "score": 1.0,
+      "passed": true,
+      "reason": "11 categories (want 5-15)"
+    },
+    {
+      "case": "one batch",
+      "check": "grouping",
+      "score": 0.84375,
+      "passed": false,
+      "reason": "together 69%, apart 100%; split: {'Developer tools': ['CLI Tools', 'Developer Tools']}; mixed: none"
+    },
+    {
+      "case": "one batch",
+      "check": "no near-duplicates (AI judge)",
+      "score": 1.0,
+      "passed": true,
+      "reason": "No two categories overlap enough to warrant merging. CLI Tools (terminal utilities like ripgrep, bat, fd, hyperfine) and Developer Tools (code quality/workflow tools like eslint, prettier, commitlint) are the closest pair, but they are meaningfully distinct: the former are general-purpose command-line utilities while the latter are code-specific workflow tools. All other category pairs have clear thematic separation. No pairs should be merged."
+    },
+    {
+      "case": "small batches",
+      "check": "coverage",
+      "score": 1.0,
+      "passed": true,
+      "reason": "missing: none; in Other: none"
+    },
+    {
+      "case": "small batches",
+      "check": "category count",
+      "score": 1.0,
+      "passed": true,
+      "reason": "8 categories (want 5-15)"
+    },
+    {
+      "case": "small batches",
+      "check": "grouping",
+      "score": 0.9406828703703703,
+      "passed": true,
+      "reason": "together 95%, apart 93%; split: {'CSS': ['Developer Tools', 'Shaders & Graphics'], 'Databases': ['Databases', 'Developer Tools']}; mixed: {'Developer Tools': ['CSS', 'Databases', 'Developer tools'], 'Shaders & Graphics': ['CSS', 'Graphics']}"
+    },
+    {
+      "case": "small batches",
+      "check": "no near-duplicates (AI judge)",
+      "score": 1.0,
+      "passed": true,
+      "reason": "After reviewing all category pairs, no two categories overlap enough to warrant merging. The closest candidates are \"Data Visualization\" (Chart.js, recharts, visx — data-driven charts) and \"Shaders & Graphics\" (animate.css, webgl-lines, pixijs — animation/rendering engines), but their contents are meaningfully distinct. All other pairs (e.g., Developer Tools vs. Databases, AI Agents vs. Developer Tools) are also sufficiently differentiated. No pair meets the threshold for merging."
+    }
+  ]
+}

@@ -38,6 +38,11 @@ export class ListsPanel implements OnInit {
     const job = this.sync();
     return job?.complete ?? job?.repos_updated === job?.repos_to_update;
   });
+  /** Repos skipped because their org blocks Starsort don't count: they come back on every sync. */
+  protected readonly changedAnything = computed(() => {
+    const job = this.sync();
+    return Boolean(job?.lists_created || job?.repos_updated || job?.lists_deleted);
+  });
   protected readonly percent = computed(() => {
     const job = this.sync();
     return job && job.batches_total > 0 ? Math.round((job.batches_done / job.batches_total) * 100) : 0;

@@ -1,0 +1,63 @@
+{
+  "model": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+  "judge_model": "us.anthropic.claude-sonnet-4-6",
+  "run_at": "2026-11-21T18:23:09+00:00",
+  "results": [
+    {
+      "case": "one batch",
+      "check": "coverage",
+      "score": 1.0,
+      "passed": true,
+      "reason": "missing: none; in Other: none"
+    },
+    {
+      "case": "one batch",
+      "check": "category count",
+      "score": 1.0,
+      "passed": true,
+      "reason": "13 categories (want 5-15)"
+    },
+    {
+      "case": "one batch",
+      "check": "grouping",
+      "score": 0.7465277777777778,
+      "passed": false,
+      "reason": "together 50%, apart 99%; split: {'Developer tools': ['CLI Tools', 'Development Tools', 'GitHub Tools'], 'AI agents and coding assistants': ['AI & LLM Tools', 'AWS & Cloud', 'LLM Skills & Prompts']}; mixed: {'AWS & Cloud': ['AI agents and coding assistants', 'AWS']}"
+    },
+    {
+      "case": "one batch",
+      "check": "no near-duplicates (AI judge)",
+      "score": 0.5,
+      "passed": true,
+      "reason": "Exactly one pair of categories should be merged: \"AI & LLM Tools\" and \"LLM Skills & Prompts.\" Both categories revolve around LLMs — one holds LLM-based software tools and the other holds LLM prompt/skill resources — and a person organizing their stars would naturally consolidate these under a single \"AI & LLM\" umbrella. No other pair of categories has sufficient overlap to warrant merging. This yields a score of 0.5."
+    },
+    {
+      "case": "small batches",
+      "check": "coverage",
+      "score": 1.0,
+      "passed": true,
+      "reason": "missing: none; in Other: none"
+    },
+    {
+      "case": "small batches",
+      "check": "category count",
+      "score": 1.0,
+      "passed": true,
+      "reason": "9 categories (want 5-15)"
+    },
+    {
+      "case": "small batches",
+      "check": "grouping",
+      "score": 1.0,
+      "passed": true,
+      "reason": "together 100%, apart 100%; split: none; mixed: none"
+    },
+    {
+      "case": "small batches",
+      "check": "no near-duplicates (AI judge)",
+      "score": 1.0,
+      "passed": true,
+      "reason": "No two categories overlap enough to warrant merging. Developer Tools vs AI & LLM is the closest candidate, but the AI-specific tools are clearly grouped by their AI/LLM nature rather than general dev utility. All other categories (UI Frameworks, Data Visualization, AWS, Databases, Shaders & Graphics, Learning Resources, Developer Portfolios) are sufficiently distinct from one another. Zero pairs should be merged."
+    }
+  ]
+}

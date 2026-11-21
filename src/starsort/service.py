@@ -148,6 +148,7 @@ def sync_github_lists(
         node_ids = {repo.full_name: repo.node_id for repo in repos if repo.node_id}
         plan = plan_sync(lists, assignments, node_ids)
         unchanged = SyncResult(lists_created=0, repos_updated=0, repos_to_update=len(plan.changes))
+        github.check_repo_access([change.node_id for change in plan.changes])
         allowed = [change for change in plan.changes if change.full_name.split("/")[0].lower() not in github.restricted_orgs]
         empty_lists = lists_to_delete(lists, allowed)
 
