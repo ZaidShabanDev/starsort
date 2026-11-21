@@ -45,7 +45,7 @@
   }
 
   @if (current && current.status === 'done') {
-    @if (current.repos_to_update === 0 && current.lists_created === 0 && !current.lists_deleted) {
+    @if (complete() && !changedAnything()) {
       <p class="banner" data-tone="ok"><strong>Up to date.</strong> Your GitHub Lists already match your categories.</p>
     } @else if (complete()) {
       <p class="banner" data-tone="ok">
@@ -61,10 +61,10 @@
       </p>
     }
     @if (current.repos_skipped) {
-      <p class="banner" data-tone="wait">
-        <strong>Skipped {{ current.repos_skipped }} repos</strong> from {{ current.skipped_orgs?.join(', ') }}.
-        That organization blocks outside apps like Starsort, so those repos were left as they are.
-        The starsort command-line tool with your own GitHub token can still sort them.
+      <p class="lists__hint">
+        {{ current.repos_skipped }} repos from {{ current.skipped_orgs?.join(', ') }} were left as they are, because
+        {{ current.skipped_orgs?.length === 1 ? 'this organization blocks' : 'these organizations block' }} outside apps
+        like Starsort. To sort them too, use the starsort command-line tool with your own GitHub token.
       </p>
     }
   } @else if (current && current.status === 'failed') {
