@@ -101,6 +101,13 @@ describe('ListsPanel', () => {
     expect(page.textContent).toContain('Skipped 2 repos from awslabs');
   });
 
+  it('says how many empty lists were removed', () => {
+    const page = render(sync({ status: 'done', lists_created: 0, lists_deleted: 2, repos_updated: 0, repos_to_update: 0, complete: true }));
+
+    expect(page.textContent).toContain('Removed 2 empty Starsort lists');
+    expect(page.textContent).not.toContain('Up to date');
+  });
+
   it('says when the lists were already up to date', () => {
     const page = render(sync({ status: 'done', lists_created: 0, repos_updated: 0, repos_to_update: 0 }));
 
