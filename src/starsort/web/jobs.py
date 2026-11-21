@@ -21,7 +21,7 @@ LISTS = "lists"  # copy the categories to the user's GitHub star Lists
 KEEP_SECONDS = 30 * 24 * 60 * 60  # DynamoDB TTL deletes a job this long after it was created
 STALE_SECONDS = 20 * 60  # longer than the worker's 15-minute Lambda limit, so a job this quiet has died
 RESULT_FIELDS = ("markdown", "categories", "repo_count", "new_repo_count")
-SYNC_FIELDS = ("lists_created", "repos_updated", "repos_to_update", "repos_skipped", "skipped_orgs", "complete")
+SYNC_FIELDS = ("lists_created", "lists_deleted", "repos_updated", "repos_to_update", "repos_skipped", "skipped_orgs", "complete")
 PUBLIC_FIELDS = (
     "job_id", "kind", "login", "status", "created_at", "updated_at", "batches_done", "batches_total", "error",
     *RESULT_FIELDS, *SYNC_FIELDS,

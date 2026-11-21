@@ -217,6 +217,7 @@ def run_sync(
         )
         db.jobs.finish_sync(job_id, {
             "lists_created": result.lists_created,
+            "lists_deleted": result.lists_deleted,
             "repos_updated": result.repos_updated,
             "repos_to_update": result.repos_to_update,
             "repos_skipped": result.repos_skipped,
