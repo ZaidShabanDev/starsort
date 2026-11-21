@@ -56,6 +56,13 @@ mutation($itemId: ID!, $listIds: [ID!]!) {
   }
 }"""
 
+DELETE_LIST_MUTATION = """
+mutation($listId: ID!) {
+  deleteUserList(input: {listId: $listId}) {
+    clientMutationId
+  }
+}"""
+
 
 class ListsError(Exception):
     pass
@@ -90,6 +97,7 @@ class StarList:
     name: str
     description: str | None = None
     item_ids: set[str] = field(default_factory=set)
+    other_items: int = 0  # items we couldn't read (hidden by an org, or not a repo): the list is never "empty"
 
     @property
     def managed(self) -> bool:
@@ -117,10 +125,26 @@ class SyncResult:
     repos_to_update: int  # what the plan needed; more than updated + skipped when the sync stopped early
     repos_skipped: int = 0  # repos of organizations that block OAuth Apps
     skipped_orgs: tuple[str, ...] = ()
+    lists_deleted: int = 0  # starsort's own lists left empty by this sync
 
     @property
     def complete(self) -> bool:
         return self.repos_updated + self.repos_skipped == self.repos_to_update
+
+
+def lists_to_delete(lists: list[StarList], applied: list[RepoChange]) -> list[StarList]:
+    """Starsort's own lists that are empty once these changes are applied (a moved repo stays only in its target list).
+    Lists with unreadable items are never deleted. Pure function, so --dry-run can show it."""
+    moved = {change.node_id for change in applied}
+    deletable = []
+    for star_list in lists:
+        if not star_list.managed or star_list.other_items:
+            continue
+        stays = star_list.item_ids - moved
+        arrives = any(change.target and change.target.lower() == star_list.name.lower() for change in applied)
+        if not stays and not arrives:
+            deletable.append(star_list)
+    return deletable
 
 
 def plan_sync(lists: list[StarList], assignments: dict[str, str], node_ids: dict[str, str]) -> SyncPlan:
@@ -203,18 +227,24 @@ class GitHubGraphQL:
                 if not node:
                     continue
                 star_list = StarList(id=node["id"], name=node["name"], description=node.get("description"))
-                star_list.item_ids = self._collect_item_ids(node["id"], node["items"])
+                star_list.item_ids, star_list.other_items = self._collect_items(node["id"], node["items"])
                 lists.append(star_list)
             if not page["pageInfo"]["hasNextPage"]:
                 return lists
             after = page["pageInfo"]["endCursor"]
 
-    def _collect_item_ids(self, list_id: str, items_page: dict) -> set[str]:
+    def _collect_items(self, list_id: str, items_page: dict) -> tuple[set[str], int]:
+        """Repo IDs in the list, plus how many items had no readable repo ID (hidden by an org, or not a repo)."""
         ids: set[str] = set()
+        others = 0
         while True:
-            ids.update(node["id"] for node in items_page["nodes"] if node and node.get("id"))
+            for node in items_page["nodes"]:
+                if node and node.get("id"):
+                    ids.add(node["id"])
+                else:
+                    others += 1
             if not items_page["pageInfo"]["hasNextPage"]:
-                return ids
+                return ids, others
             after = items_page["pageInfo"]["endCursor"]
             items_page = self.run(LIST_ITEMS_QUERY, {"id": list_id, "after": after}, partial_ok=True)["node"]["items"]
 
@@ -224,6 +254,9 @@ class GitHubGraphQL:
 
     def set_lists_for_item(self, item_id: str, list_ids: list[str]) -> None:
         self.run(SET_LISTS_MUTATION, {"itemId": item_id, "listIds": list_ids})
+
+    def delete_list(self, list_id: str) -> None:
+        self.run(DELETE_LIST_MUTATION, {"listId": list_id})
 
 
 def apply_sync(
@@ -238,13 +271,15 @@ def apply_sync(
     on_progress: Callable[[int, int], None] | None = None,
     skip_owners: Iterable[str] = (),
 ) -> SyncResult:
-    """Apply the plan, at most max_changes repos. Stops cleanly on GitHub's rate limit; the next sync continues.
-    Repos of orgs that block OAuth Apps are skipped: their lists can't be read, so a change could drop the user's own lists."""
+    """Apply at most max_changes repos, creating each list just before its first repo, then delete starsort's emptied lists.
+    Stops cleanly on GitHub's rate limit. Why repos of blocking orgs are skipped: see docs/Starsort/handoff_Starsort.md (P8)."""
     list_ids = {star_list.name.lower(): star_list.id for star_list in lists}
     total = len(plan.changes)
-    created = updated = skipped = 0
+    created = updated = skipped = deleted = 0
     blocked = {owner.lower() for owner in skip_owners}
     skipped_orgs: set[str] = set()
+    new_lists: list[StarList] = []
+    applied: list[RepoChange] = []
     mutations = 0
 
     def before_mutation() -> None:
@@ -253,25 +288,30 @@ def apply_sync(
             pause()
         mutations += 1
 
-    try:
-        for name in plan.lists_to_create:
+    def list_id_for(category: str) -> str:
+        nonlocal created
+        key = category.lower()
+        if key not in list_ids:
             before_mutation()
-            list_ids[name.lower()] = client.create_list(name, private=private)
+            list_ids[key] = client.create_list(category, private=private)
+            new_lists.append(StarList(id=list_ids[key], name=category, description=MANAGED_MARKER))
             created += 1
             if on_step:
-                on_step(f"created list: {name}")
+                on_step(f"created list: {category}")
+        return list_ids[key]
 
+    try:
         for change in plan.changes[:max_changes]:
             owner = change.full_name.split("/")[0].lower()
             if owner in blocked:
                 skipped += 1
                 skipped_orgs.add(owner)
             else:
-                before_mutation()
                 # updateUserListsForItem REPLACES the repo's lists, so send the user's own lists back too.
                 ids = set(change.keep_list_ids)
                 if change.target:
-                    ids.add(list_ids[change.target.lower()])
+                    ids.add(list_id_for(change.target))
+                before_mutation()
                 try:
                     client.set_lists_for_item(change.node_id, sorted(ids))
                 except OrgRestrictedError as error:
@@ -280,10 +320,19 @@ def apply_sync(
                     blocked |= error.orgs
                 else:
                     updated += 1
+                    applied.append(change)
                     if on_step:
                         on_step(f"{change.full_name} -> {change.target or '(removed from starsort lists)'}")
             if on_progress:
                 on_progress(updated + skipped, total)
+
+        if updated + skipped == total:  # after a partial sync, a list that looks empty may still get repos next time
+            for star_list in lists_to_delete([*lists, *new_lists], applied):
+                before_mutation()
+                client.delete_list(star_list.id)
+                deleted += 1
+                if on_step:
+                    on_step(f"deleted empty list: {star_list.name}")
     except RateLimitedError as error:
         if on_step:
             on_step(f"stopped early: {error}")
@@ -293,4 +342,5 @@ def apply_sync(
         repos_to_update=total,
         repos_skipped=skipped,
         skipped_orgs=tuple(sorted(skipped_orgs)),
+        lists_deleted=deleted,
     )

@@ -12,7 +12,7 @@ from typing import Protocol
 from starsort.cache import StarCache, load_cache, merge_repos, save_cache
 from starsort.categorizer import Asker, group_assignments, group_by_language, uncategorized, update_assignments
 from starsort.github import AppAuth, fetch_starred
-from starsort.github_lists import GitHubGraphQL, ListsError, SyncResult, apply_sync, plan_sync
+from starsort.github_lists import GitHubGraphQL, ListsError, SyncResult, apply_sync, lists_to_delete, plan_sync
 from starsort.markdown import render_markdown
 from starsort.models import Repo
 from starsort.providers import DEFAULT_MODELS, Provider, build_model, make_asker
@@ -148,15 +148,19 @@ def sync_github_lists(
         node_ids = {repo.full_name: repo.node_id for repo in repos if repo.node_id}
         plan = plan_sync(lists, assignments, node_ids)
         unchanged = SyncResult(lists_created=0, repos_updated=0, repos_to_update=len(plan.changes))
+        allowed = [change for change in plan.changes if change.full_name.split("/")[0].lower() not in github.restricted_orgs]
+        empty_lists = lists_to_delete(lists, allowed)
 
-        if not plan.lists_to_create and not plan.changes:
+        if not plan.changes and not empty_lists:
             log("GitHub Lists are already up to date.")
             return unchanged
-        log(f"GitHub Lists: {len(plan.lists_to_create)} to create, {len(plan.changes)} repos to update.")
+        log(f"GitHub Lists: {len(plan.lists_to_create)} to create, {len(plan.changes)} repos to update, {len(empty_lists)} empty to delete.")
         for name in plan.lists_to_create:
             log(f"  + list: {name}")
         for change in plan.changes:
             log(f"  {change.full_name} -> {change.target or '(removed from starsort lists)'}")
+        for star_list in empty_lists:
+            log(f"  - list: {star_list.name} (empty, made by starsort)")
         if dry_run:
             log("Dry run: nothing was changed on GitHub.")
             return unchanged

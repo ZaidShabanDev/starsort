@@ -45,11 +45,14 @@
   }
 
   @if (current && current.status === 'done') {
-    @if (current.repos_to_update === 0 && current.lists_created === 0) {
+    @if (current.repos_to_update === 0 && current.lists_created === 0 && !current.lists_deleted) {
       <p class="banner" data-tone="ok"><strong>Up to date.</strong> Your GitHub Lists already match your categories.</p>
     } @else if (complete()) {
       <p class="banner" data-tone="ok">
         <strong>Done.</strong> Created {{ current.lists_created }} lists and updated {{ current.repos_updated }} repos on GitHub.
+        @if (current.lists_deleted) {
+          Removed {{ current.lists_deleted }} empty Starsort lists.
+        }
       </p>
     } @else {
       <p class="banner" data-tone="wait">

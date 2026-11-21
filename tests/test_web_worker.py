@@ -5,6 +5,7 @@ import pytest
 
 from starsort.cache import StarCache
 from starsort.github import GitHubError
+from starsort.github_lists import MANAGED_MARKER, StarList
 from starsort.models import BatchCategorization, Repo, RepoAssignment
 from starsort.web import jobs, worker
 from starsort.web.jobs import STALE_SECONDS, JobStore
@@ -225,11 +226,13 @@ class FakeListsGitHub:
     login = "octo"
 
     restricted: set[str] = set()
+    existing: list[StarList] = []
 
     def __init__(self, token: str):
         self.token = token
         self.created: list[tuple[str, bool]] = []
         self.updates: list[tuple[str, list[str]]] = []
+        self.deleted: list[str] = []
         self.restricted_orgs = set(self.restricted)
 
     def __enter__(self):
@@ -242,7 +245,10 @@ class FakeListsGitHub:
         return self.login
 
     def fetch_lists(self):
-        return []
+        return list(self.existing)
+
+    def delete_list(self, list_id):
+        self.deleted.append(list_id)
 
     def create_list(self, name, private=False):
         self.created.append((name, private))
@@ -299,6 +305,17 @@ def test_sync_copies_categories_to_lists_then_revokes_the_token(lists_github, db
     assert (job["status"], job["lists_created"], job["repos_updated"], job["repos_to_update"]) == (jobs.DONE, 1, 1, 1)
     assert revoked == ["gho_lists"]
     assert db.usage.try_start("1", weekly=False).allowed  # the running slot is free again
+
+
+def test_sync_removes_an_empty_starsort_list(monkeypatch, lists_github, db):
+    monkeypatch.setattr(FakeListsGitHub, "existing", [StarList(id="OLD", name="AI Agents", description=MANAGED_MARKER)])
+    save_categories(db)
+    job_id = sync_job(db)
+
+    sync(db, job_id, [])
+
+    assert lists_github[0].deleted == ["OLD"]
+    assert db.jobs.get(job_id)["lists_deleted"] == 1
 
 
 def test_sync_skips_repos_of_an_org_that_blocks_the_app(monkeypatch, lists_github, db):

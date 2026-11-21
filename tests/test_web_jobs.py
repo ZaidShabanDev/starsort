@@ -32,7 +32,8 @@ def test_finished_sync_shows_its_counts(store):
     job_id = store.create("1", "octo", kind=jobs.LISTS)["job_id"]
 
     store.finish_sync(job_id, {
-        "lists_created": 2, "repos_updated": 10, "repos_to_update": 12, "repos_skipped": 2, "skipped_orgs": ["awslabs"], "complete": True,
+        "lists_created": 2, "lists_deleted": 1, "repos_updated": 10, "repos_to_update": 12,
+        "repos_skipped": 2, "skipped_orgs": ["awslabs"], "complete": True,
     })
 
     view = public_view(store.get(job_id))

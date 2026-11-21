@@ -48,6 +48,7 @@ export interface Job {
   new_repo_count?: number;
   // A finished Lists sync (complete is false when GitHub's rate limit stopped it early):
   lists_created?: number;
+  lists_deleted?: number; // starsort's own lists left empty
   repos_updated?: number;
   repos_to_update?: number;
   repos_skipped?: number; // repos of organizations that block apps like Starsort

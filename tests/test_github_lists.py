@@ -12,6 +12,7 @@ from starsort.github_lists import (
     RateLimitedError,
     StarList,
     apply_sync,
+    lists_to_delete,
     plan_sync,
 )
 
@@ -79,6 +80,33 @@ def test_repo_without_node_id_is_skipped():
     assert plan.changes == []
 
 
+# ---------- lists_to_delete (pure logic) ----------
+
+def test_starsort_list_emptied_by_the_changes_is_deleted():
+    lists = [managed_list("OLD", "AI Agents", "R1")]
+    plan = plan_sync(lists, {"a/one": "AI Coding Assistants"}, {"a/one": "R1"})
+
+    assert [l.id for l in lists_to_delete(lists, plan.changes)] == ["OLD"]
+
+
+def test_users_own_empty_list_is_never_deleted():
+    assert lists_to_delete([own_list("MINE", "Read later")], []) == []
+
+
+def test_list_with_items_we_cannot_read_is_never_deleted():
+    hidden = managed_list("AWS", "AWS")
+    hidden.other_items = 1
+
+    assert lists_to_delete([hidden], []) == []
+
+
+def test_list_that_receives_a_repo_is_kept():
+    lists = [managed_list("AI", "AI", "R1")]
+    plan = plan_sync(lists, {"a/one": "Other", "b/two": "AI"}, {"a/one": "R1", "b/two": "R2"})
+
+    assert lists_to_delete(lists, plan.changes) == []
+
+
 # ---------- apply_sync ----------
 
 class FakeGitHub:
@@ -86,8 +114,12 @@ class FakeGitHub:
         self.created: list[str] = []
         self.private: list[bool] = []
         self.updates: list[tuple[str, list[str]]] = []
+        self.deleted: list[str] = []
         self.rate_limited_after = rate_limited_after
         self.restricted_items = restricted_items
+
+    def delete_list(self, list_id):
+        self.deleted.append(list_id)
 
     def create_list(self, name, private=False):
         self.created.append(name)
@@ -165,6 +197,54 @@ def test_apply_skips_an_org_that_refuses_a_change_and_its_other_repos():
 
     assert github.updates == [("R3", ["NEW-AWS"])]  # R2 is skipped without asking GitHub
     assert (result.repos_updated, result.repos_skipped, result.complete) == (1, 2, True)
+
+
+def test_apply_creates_no_list_when_all_its_repos_are_skipped():
+    github = FakeGitHub()
+    plan = plan_sync([], {"awslabs/mcp": "AWS", "me/tool": "Tools"}, {"awslabs/mcp": "R1", "me/tool": "R2"})
+
+    result = apply_sync(github, plan, [], skip_owners={"awslabs"})
+
+    assert github.created == ["Tools"]
+    assert result.lists_created == 1
+
+
+def test_apply_deletes_starsort_lists_left_empty():
+    lists = [managed_list("OLD", "AI Agents", "R1"), own_list("MINE", "Read later")]
+    github = FakeGitHub()
+
+    result = apply_sync(github, plan_sync(lists, {"a/one": "AI Coding Assistants"}, {"a/one": "R1"}), lists)
+
+    assert github.created == ["AI Coding Assistants"]
+    assert github.deleted == ["OLD"]
+    assert result.lists_deleted == 1
+
+
+def test_apply_cleans_up_even_when_no_repo_needs_to_move():
+    lists = [managed_list("OLD", "Empty")]
+    github = FakeGitHub()
+
+    result = apply_sync(github, plan_sync(lists, {}, {}), lists)
+
+    assert (github.deleted, result.lists_deleted) == (["OLD"], 1)
+
+
+def test_apply_keeps_empty_looking_lists_when_the_sync_stopped_early():
+    lists = [managed_list("OLD", "AI Agents", "R1", "R2")]
+    plan = plan_sync(lists, {"a/one": "AI", "b/two": "AI"}, {"a/one": "R1", "b/two": "R2"})
+    github = FakeGitHub()
+
+    apply_sync(github, plan, lists, max_changes=1)
+
+    assert github.deleted == []
+
+
+def test_apply_deletes_a_new_list_whose_only_repo_was_refused():
+    github = FakeGitHub(restricted_items=("R1",))
+
+    apply_sync(github, plan_sync([], {"awslabs/mcp": "AWS"}, {"awslabs/mcp": "R1"}), [])
+
+    assert (github.created, github.deleted) == (["AWS"], ["NEW-AWS"])
 
 
 def test_apply_pauses_between_changes_and_reports_progress():
@@ -253,8 +333,22 @@ def test_fetch_lists_keeps_what_it_can_read_when_an_org_blocks_the_app():
     with graphql_client(handler) as github:
         lists = github.fetch_lists()
 
-    assert lists[0].item_ids == {"R1"}
+    assert (lists[0].item_ids, lists[0].other_items) == ({"R1"}, 1)
     assert github.restricted_orgs == {"awslabs"}
+
+
+def test_delete_list_sends_the_list_id():
+    sent = []
+
+    def handler(request):
+        sent.append(json.loads(request.content))
+        return httpx.Response(200, json={"data": {"deleteUserList": {"clientMutationId": None}}})
+
+    with graphql_client(handler) as github:
+        github.delete_list("L9")
+
+    assert "deleteUserList" in sent[0]["query"]
+    assert sent[0]["variables"] == {"listId": "L9"}
 
 
 def test_change_refused_by_an_org_raises_org_restricted_error():
