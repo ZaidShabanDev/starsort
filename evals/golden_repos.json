@@ -1,0 +1,464 @@
+[
+  {
+    "full_name": "obra/superpowers",
+    "description": "An agentic skills framework & software development methodology that works.",
+    "topics": [
+      "ai",
+      "brainstorming",
+      "coding",
+      "obra",
+      "sdlc",
+      "skills",
+      "subagent-driven-development",
+      "superpowers"
+    ],
+    "language": "Shell",
+    "group": "AI agents and coding assistants"
+  },
+  {
+    "full_name": "multica-ai/andrej-karpathy-skills",
+    "description": "A single CLAUDE.md file to improve Claude Code behavior, derived from Andrej Karpathy's observations on LLM coding pitfalls.",
+    "topics": [],
+    "language": null,
+    "group": "AI agents and coding assistants"
+  },
+  {
+    "full_name": "awslabs/aidlc-workflows",
+    "description": "AI-Driven Life Cycle (AI-DLC) adaptive workflow steering rules for AI coding agents",
+    "topics": [],
+    "language": "TypeScript",
+    "group": "AI agents and coding assistants"
+  },
+  {
+    "full_name": "HKUDS/CLI-Anything",
+    "description": "\"CLI-Anything: Making ALL Software Agent-Native\" -- CLI-Hub: https://clianything.cc/",
+    "topics": [],
+    "language": "Python",
+    "group": "AI agents and coding assistants"
+  },
+  {
+    "full_name": "odysseus-dev/odysseus",
+    "description": "Self-hosted AI workspace. ",
+    "topics": [],
+    "language": "Python",
+    "group": "AI agents and coding assistants"
+  },
+  {
+    "full_name": "botpress/botpress",
+    "description": "The open-source hub to build & deploy GPT/LLM Agents ⚡️",
+    "topics": [
+      "agent",
+      "ai",
+      "botpress",
+      "chatbot",
+      "chatgpt",
+      "gpt",
+      "gpt-4",
+      "langchain",
+      "llm",
+      "nlp",
+      "openai",
+      "prompt"
+    ],
+    "language": "TypeScript",
+    "group": "AI agents and coding assistants"
+  },
+  {
+    "full_name": "awslabs/mcp",
+    "description": "Open source MCP Servers for AWS",
+    "topics": [
+      "aws",
+      "mcp",
+      "mcp-client",
+      "mcp-clients",
+      "mcp-host",
+      "mcp-server",
+      "mcp-servers",
+      "mcp-tools",
+      "modelcontextprotocol"
+    ],
+    "language": "Python",
+    "group": "AWS"
+  },
+  {
+    "full_name": "aws-samples/sample-cognito-user-mtls-idp",
+    "description": null,
+    "topics": [],
+    "language": "Python",
+    "group": "AWS"
+  },
+  {
+    "full_name": "donnemartin/awesome-aws",
+    "description": "A curated list of awesome Amazon Web Services (AWS) libraries, open source repos, guides, blogs, and other resources.  Featuring the Fiery Meter of AWSome.",
+    "topics": [
+      "aws",
+      "aws-cli",
+      "aws-sdk",
+      "cloud",
+      "cloud-management",
+      "cloudformation",
+      "cloudwatch",
+      "dynamodb",
+      "ec2",
+      "ecs",
+      "elasticsearch",
+      "iam",
+      "kinesis",
+      "lambda",
+      "machine-learning",
+      "rds",
+      "redshift",
+      "route53",
+      "s3",
+      "serverless"
+    ],
+    "language": "Python",
+    "group": "AWS"
+  },
+  {
+    "full_name": "ZaidShabanDev/portfolio",
+    "description": null,
+    "topics": [],
+    "language": "TypeScript",
+    "group": "Developer portfolios"
+  },
+  {
+    "full_name": "emmabostian/developer-portfolios",
+    "description": "A list of developer portfolios for your inspiration",
+    "topics": [],
+    "language": "Python",
+    "group": "Developer portfolios"
+  },
+  {
+    "full_name": "mattdesl/webgl-lines",
+    "description": "some interactive content for a blog post",
+    "topics": [],
+    "language": "JavaScript",
+    "group": "Graphics"
+  },
+  {
+    "full_name": "pixijs/pixijs",
+    "description": "The HTML5 Creation Engine: Create beautiful digital content with the fastest, most flexible 2D WebGL renderer.",
+    "topics": [
+      "canvas",
+      "canvas2d",
+      "data-visualization",
+      "game",
+      "glsl",
+      "javascript",
+      "pixi",
+      "pixijs",
+      "renderer",
+      "rendering",
+      "rendering-2d-graphics",
+      "rendering-engine",
+      "webgl"
+    ],
+    "language": "TypeScript",
+    "group": "Graphics"
+  },
+  {
+    "full_name": "BurntSushi/ripgrep",
+    "description": "ripgrep recursively searches directories for a regex pattern while respecting your gitignore",
+    "topics": [
+      "cli",
+      "command-line",
+      "command-line-tool",
+      "gitignore",
+      "grep",
+      "recursively-search",
+      "regex",
+      "ripgrep",
+      "rust",
+      "search"
+    ],
+    "language": "Rust",
+    "group": "Developer tools"
+  },
+  {
+    "full_name": "sharkdp/bat",
+    "description": "A cat(1) clone with wings.",
+    "topics": [
+      "cli",
+      "command-line",
+      "git",
+      "hacktoberfest",
+      "rust",
+      "syntax-highlighting",
+      "terminal",
+      "tool"
+    ],
+    "language": "Rust",
+    "group": "Developer tools"
+  },
+  {
+    "full_name": "sharkdp/fd",
+    "description": "A simple, fast and user-friendly alternative to 'find'",
+    "topics": [
+      "cli",
+      "command-line",
+      "filesystem",
+      "hacktoberfest",
+      "regex",
+      "rust",
+      "search",
+      "terminal",
+      "tool"
+    ],
+    "language": "Rust",
+    "group": "Developer tools"
+  },
+  {
+    "full_name": "sharkdp/hyperfine",
+    "description": "A command-line benchmarking tool",
+    "topics": [
+      "benchmark",
+      "cli",
+      "command-line",
+      "rust",
+      "terminal",
+      "tool"
+    ],
+    "language": "Rust",
+    "group": "Developer tools"
+  },
+  {
+    "full_name": "antonmedv/fx",
+    "description": "Terminal JSON viewer & processor",
+    "topics": [
+      "cli",
+      "command-line",
+      "json",
+      "tui"
+    ],
+    "language": "Go",
+    "group": "Developer tools"
+  },
+  {
+    "full_name": "animate-css/animate.css",
+    "description": "🍿 A cross-browser library of CSS animations. As easy to use as an easy thing.",
+    "topics": [
+      "animation",
+      "css",
+      "css-animations",
+      "stylesheets"
+    ],
+    "language": "CSS",
+    "group": "CSS"
+  },
+  {
+    "full_name": "jgthms/bulma",
+    "description": "Modern CSS framework based on Flexbox",
+    "topics": [
+      "css",
+      "css-framework",
+      "design",
+      "flexbox",
+      "html"
+    ],
+    "language": "CSS",
+    "group": "CSS"
+  },
+  {
+    "full_name": "pure-css/pure",
+    "description": "A set of small, responsive CSS modules that you can use in every web project.",
+    "topics": [
+      "css",
+      "html",
+      "pure"
+    ],
+    "language": "JavaScript",
+    "group": "CSS"
+  },
+  {
+    "full_name": "chartjs/Chart.js",
+    "description": "Simple HTML5 Charts using the <canvas> tag",
+    "topics": [
+      "canvas",
+      "chart",
+      "graph",
+      "html5",
+      "html5-charts",
+      "javascript"
+    ],
+    "language": "JavaScript",
+    "group": "Charts"
+  },
+  {
+    "full_name": "recharts/recharts",
+    "description": "Redefined chart library built with React and D3",
+    "topics": [
+      "chart",
+      "charting-library",
+      "components",
+      "d3",
+      "data-visualisation",
+      "javascript",
+      "react",
+      "recharts",
+      "typescript",
+      "ui"
+    ],
+    "language": "TypeScript",
+    "group": "Charts"
+  },
+  {
+    "full_name": "airbnb/visx",
+    "description": "🐯 visx | visualization components",
+    "topics": [
+      "chart",
+      "d3",
+      "data-visualization",
+      "react",
+      "svg",
+      "visualization",
+      "visx",
+      "vx"
+    ],
+    "language": "TypeScript",
+    "group": "Charts"
+  },
+  {
+    "full_name": "EbookFoundation/free-programming-books",
+    "description": ":books: Freely available programming books",
+    "topics": [
+      "books",
+      "education",
+      "hacktoberfest",
+      "list",
+      "resource"
+    ],
+    "language": "Python",
+    "group": "Learning"
+  },
+  {
+    "full_name": "ossu/computer-science",
+    "description": "🎓 Path to a free self-taught education in Computer Science!",
+    "topics": [
+      "awesome-list",
+      "computer-science",
+      "courses",
+      "curriculum"
+    ],
+    "language": "HTML",
+    "group": "Learning"
+  },
+  {
+    "full_name": "cockroachdb/cockroach",
+    "description": "CockroachDB — the cloud native, distributed SQL database designed for high availability, effortless scale, and control over data placement.",
+    "topics": [
+      "cockroachdb",
+      "database",
+      "distributed-database",
+      "go",
+      "hacktoberfest",
+      "sql"
+    ],
+    "language": "Go",
+    "group": "Databases"
+  },
+  {
+    "full_name": "tursodatabase/libsql",
+    "description": "libSQL is a fork of SQLite that is both Open Source, and Open Contributions.",
+    "topics": [
+      "database",
+      "embedded-database",
+      "rust",
+      "sqlite",
+      "webassembly"
+    ],
+    "language": "C",
+    "group": "Databases"
+  },
+  {
+    "full_name": "eslint/eslint",
+    "description": "Find and fix problems in your JavaScript code.",
+    "topics": [
+      "ecmascript",
+      "eslint",
+      "javascript",
+      "linter",
+      "static-code-analysis"
+    ],
+    "language": "JavaScript",
+    "group": "Developer tools"
+  },
+  {
+    "full_name": "prettier/prettier",
+    "description": "Prettier is an opinionated code formatter.",
+    "topics": [
+      "angular",
+      "ast",
+      "css",
+      "flow",
+      "formatter",
+      "graphql",
+      "html",
+      "javascript",
+      "json",
+      "jsx",
+      "less",
+      "markdown",
+      "prettier",
+      "printer",
+      "scss",
+      "typescript",
+      "vue",
+      "yaml"
+    ],
+    "language": "JavaScript",
+    "group": "Developer tools"
+  },
+  {
+    "full_name": "conventional-changelog/commitlint",
+    "description": "📓 Lint commit messages",
+    "topics": [
+      "commit",
+      "conventions",
+      "git",
+      "lint"
+    ],
+    "language": "TypeScript",
+    "group": "Developer tools"
+  },
+  {
+    "full_name": "mgks/GitHubTree",
+    "description": "Visualise any GitHub repository folder structure. Available as a web app, CLI tool, and node.js library.",
+    "topics": [
+      "api",
+      "github",
+      "nodejs",
+      "npm-package",
+      "structured-data",
+      "tree-structure",
+      "visualization",
+      "webapp"
+    ],
+    "language": "JavaScript",
+    "group": "Developer tools"
+  },
+  {
+    "full_name": "elementalsouls/Claude-BugHunter",
+    "description": "A Claude Code skill bundle for bug hunting and external red-team work - 82 skills, 15 slash commands, 681 disclosed-report patterns curated across 24 core vulnerability classes, plus enterprise identity + infrastructure attack matrices.",
+    "topics": [
+      "ai-security",
+      "anthropic",
+      "application-security",
+      "bug-bounty",
+      "bugbounty",
+      "bugcrowd",
+      "claude",
+      "claude-code",
+      "claude-skills",
+      "ethical-hacking",
+      "hackerone",
+      "offensive-security",
+      "pentesting",
+      "red-team",
+      "security-tools",
+      "web-security"
+    ],
+    "language": "Python",
+    "group": null
+  }
+]
