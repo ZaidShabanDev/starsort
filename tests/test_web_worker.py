@@ -20,6 +20,7 @@ from starsort.web.worker import (
     Tables,
     WorkerSettings,
     priced_ask_factory,
+    priced_merge_factory,
     run_job,
     run_sync,
 )
@@ -215,6 +216,22 @@ def test_priced_asker_adds_every_call_to_the_spend_counter(monkeypatch, db):
     seen["on_usage"](0, 100_000)
 
     assert db.spend.month_total() == 3_300_000 + 1_650_000
+
+
+def test_merge_call_counts_toward_the_spend_cap_too(monkeypatch, db):
+    seen = {}
+
+    def fake_make_merger(model, on_usage=None):
+        seen["on_usage"] = on_usage
+        return lambda prompt: None
+
+    monkeypatch.setattr(worker, "build_model", lambda provider, model_id: f"model:{model_id}")
+    monkeypatch.setattr(worker, "make_merger", fake_make_merger)
+
+    priced_merge_factory(SETTINGS, db.spend)()
+    seen["on_usage"](1_000_000, 0)
+
+    assert db.spend.month_total() == 3_300_000
 
 
 # ---------- GitHub Lists sync ----------

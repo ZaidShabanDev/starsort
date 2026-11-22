@@ -10,12 +10,12 @@ from pathlib import Path
 from typing import Protocol
 
 from starsort.cache import StarCache, load_cache, merge_repos, save_cache
-from starsort.categorizer import Asker, group_assignments, group_by_language, uncategorized, update_assignments
+from starsort.categorizer import Asker, Merger, group_assignments, group_by_language, uncategorized, update_assignments
 from starsort.github import AppAuth, fetch_starred
 from starsort.github_lists import GitHubGraphQL, ListsError, SyncResult, apply_sync, lists_to_delete, plan_sync
 from starsort.markdown import render_markdown
 from starsort.models import Repo
-from starsort.providers import DEFAULT_MODELS, Provider, build_model, make_asker
+from starsort.providers import DEFAULT_MODELS, Provider, build_model, make_asker, make_merger
 
 Log = Callable[[str], None]
 OnBatch = Callable[[int, int], None]
@@ -93,11 +93,16 @@ def default_ask_factory(options: OrganizeOptions) -> Callable[[], Asker]:
     return lambda: make_asker(build_model(options.provider, options.model_id))
 
 
+def default_merge_factory(options: OrganizeOptions) -> Callable[[], Merger]:
+    return lambda: make_merger(build_model(options.provider, options.model_id))
+
+
 def organize(
     options: OrganizeOptions,
     store: CacheStore,
     *,
     ask_factory: Callable[[], Asker] | None = None,
+    merge_factory: Callable[[], Merger] | None = None,
     log: Log = _quiet,
     on_batch: OnBatch | None = None,
     today: date | None = None,
@@ -115,7 +120,9 @@ def organize(
             log(f"Categorizing {new_count} new repos ({len(repos) - new_count} kept) with {options.provider.value} ({model})...")
         else:
             log("No new repos to categorize. Keeping saved categories (no AI call).")
-        assignments = update_assignments(repos, saved, ask_factory or default_ask_factory(options), on_batch=on_batch)
+        if ask_factory is None:  # a caller with its own (fake or priced) AI passes its own merge_factory too
+            ask_factory, merge_factory = default_ask_factory(options), merge_factory or default_merge_factory(options)
+        assignments = update_assignments(repos, saved, ask_factory, on_batch=on_batch, merge_factory=merge_factory, log=log)
         store.save(cache.model_copy(update={"categories": assignments}))
         categories = group_assignments(repos, assignments)
     else:

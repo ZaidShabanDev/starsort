@@ -3,7 +3,7 @@ from datetime import date, datetime, timezone
 import pytest
 
 from starsort.cache import StarCache
-from starsort.models import BatchCategorization, Repo, RepoAssignment
+from starsort.models import BatchCategorization, CategoryMerge, CategoryMerges, Repo, RepoAssignment
 from starsort.service import FileCacheStore, OrganizeOptions, organize
 
 TODAY = date(2026, 11, 14)
@@ -87,6 +87,17 @@ def test_first_run_categorizes_everything_and_saves_categories(github):
     assert result.new_repo_count == 2
     assert store.cache.categories == {"a/agent": "AI Agents", "b/shader": "Graphics"}
     assert "## AI Agents" in result.markdown and "## Graphics" in result.markdown
+
+
+def test_merge_pass_joins_near_duplicate_categories(github):
+    store = MemoryStore()
+    ai = FakeAI({"a/agent": "AI Agents", "b/shader": "AI Coding Assistants"})
+    answer = CategoryMerges(merges=[CategoryMerge(names=["AI Agents", "AI Coding Assistants"], into="AI Agents")])
+
+    result = organize(OrganizeOptions(username="octo"), store, ask_factory=ai, merge_factory=lambda: lambda prompt: answer)
+
+    assert store.cache.categories == {"a/agent": "AI Agents", "b/shader": "AI Agents"}
+    assert list(result.categories) == ["AI Agents"]
 
 
 def test_second_run_with_nothing_new_makes_no_ai_call(github):
