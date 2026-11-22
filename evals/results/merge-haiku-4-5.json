@@ -1,0 +1,64 @@
+{
+  "model": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+  "judge_model": "us.anthropic.claude-sonnet-4-6",
+  "merge_pass": true,
+  "run_at": "2026-11-22T17:51:23+00:00",
+  "results": [
+    {
+      "case": "one batch",
+      "check": "coverage",
+      "score": 1.0,
+      "passed": true,
+      "reason": "missing: none; in Other: none"
+    },
+    {
+      "case": "one batch",
+      "check": "category count",
+      "score": 1.0,
+      "passed": true,
+      "reason": "11 categories (want 5-15)"
+    },
+    {
+      "case": "one batch",
+      "check": "grouping",
+      "score": 0.84375,
+      "passed": false,
+      "reason": "together 69%, apart 100%; split: {'Developer tools': ['CLI Tools', 'Developer Tools']}; mixed: none"
+    },
+    {
+      "case": "one batch",
+      "check": "no near-duplicates (AI judge)",
+      "score": 0.5,
+      "passed": false,
+      "reason": "One pair of categories should likely be merged: **CLI Tools** and **Developer Tools**. Both contain tools primarily used by developers in a terminal/command-line context — ripgrep, bat, fd, hyperfine, and fx (CLI Tools) are all developer-facing CLI utilities, while eslint, prettier, commitlint, and GitHubTree (Developer Tools) are also developer-facing utilities. A person organizing their starred repos would reasonably group all of these under a single \"Developer Tools\" or \"CLI & Developer Tools\" umbrella. No other pairs are strong enough merge candidates: Data Visualization (charting libraries) vs Graphics & WebGL (low-level rendering engines) serve meaningfully different purposes; AI Agents is sufficiently distinct from other categories; and all other categories are clearly separate."
+    },
+    {
+      "case": "small batches",
+      "check": "coverage",
+      "score": 1.0,
+      "passed": true,
+      "reason": "missing: none; in Other: none"
+    },
+    {
+      "case": "small batches",
+      "check": "category count",
+      "score": 1.0,
+      "passed": true,
+      "reason": "8 categories (want 5-15)"
+    },
+    {
+      "case": "small batches",
+      "check": "grouping",
+      "score": 0.9369212962962963,
+      "passed": true,
+      "reason": "together 91%, apart 97%; split: {'AI agents and coding assistants': ['AI Agents', 'Learning Resources'], 'Graphics': ['Data Visualization', 'UI Components & Libraries']}; mixed: {'Learning Resources': ['AI agents and coding assistants', 'Developer portfolios', 'Learning'], 'Data Visualization': ['Charts', 'Graphics'], 'UI Components & Libraries': ['CSS', 'Graphics']}"
+    },
+    {
+      "case": "small batches",
+      "check": "no near-duplicates (AI judge)",
+      "score": 0.5,
+      "passed": false,
+      "reason": "Exactly one pair of categories should be merged: **Security Tools** and **Developer Tools**. \"Security Tools\" contains only a single repository (Claude-BugHunter), a developer-facing CLI/AI security tool. A person organizing their stars would not maintain a one-item category separately from the broader \"Developer Tools\" bucket, which already contains CLI utilities and code-quality tools of the same nature. No other pair is clearly merge-worthy: Data Visualization and UI Components differ sufficiently (charts vs. CSS frameworks), AWS is domain-specific enough to stand alone, and AI Agents is distinct from generic Developer Tools. One mergeable pair → score 0.5."
+    }
+  ]
+}

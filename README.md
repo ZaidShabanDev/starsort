@@ -53,6 +53,7 @@ GitHub REST API ──> local JSON cache ──> Strands agent (Claude) ──> 
 - **Only the categorizing step uses AI.** Fetching, caching and writing Markdown are plain, deterministic Python.
 - **Structured output.** The agent must answer as a Pydantic model (`BatchCategorization`), so results are validated JSON, not free text.
 - **Batches of 50.** Large star lists (hundreds or thousands) are sent in small requests. Each batch sees the categories created so far, so names stay consistent.
+- **Merge pass.** After new repos are sorted, one small extra AI call looks only at the category names (with a few example repos) and merges near-duplicates, such as "CLI Tools" and "Developer Tools". Names from earlier runs win, so your GitHub lists keep their names. If the call fails, the run keeps its categories.
 - **Categories come from your data**, aiming for 5–15 plus an "Other" bucket. If there are too many, the smallest are folded into "Other". Categories from earlier runs are always kept.
 - **Incremental.** Saved categories never change unless you ask (`--recategorize`). If nothing is new, no AI call is made at all.
 - **Prompt-injection aware.** Repo descriptions are treated as data, never as instructions.
@@ -258,6 +259,7 @@ Unit tests can't check AI output, because the model words things a little differ
 AWS_PROFILE=starsort-cli uv run python -m evals.run_evals                                    # print the scores
 AWS_PROFILE=starsort-cli uv run python -m evals.run_evals --save evals/results/baseline.json # keep them
 AWS_PROFILE=starsort-cli uv run python -m evals.run_evals --model <bedrock-model-id>         # compare models
+AWS_PROFILE=starsort-cli uv run python -m evals.run_evals --no-merge                         # without the merge pass
 ```
 
 The judge always uses Sonnet 4.6 (`--judge-model`), so runs with different models are graded the same way. Each run costs a few cents of Bedrock. Evals are for developers only: they are never deployed, and the web app never calls the judge. Scores move a little between runs, so compare big differences, not small ones. Saved results are in [`evals/results/`](evals/results/).

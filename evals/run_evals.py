@@ -17,9 +17,9 @@ from strands_evals.evaluators import Evaluator, OutputEvaluator
 from strands_evals.types.evaluation import EvaluationData, EvaluationOutput
 
 from evals.scoring import category_count, grouping_score, invert, missing_repos, other_repos
-from starsort.categorizer import MAX_CATEGORIES, categorize_repos, limit_categories
+from starsort.categorizer import MAX_CATEGORIES, update_assignments
 from starsort.models import Repo
-from starsort.providers import Provider, build_model, make_asker
+from starsort.providers import Provider, build_model, make_asker, make_merger
 
 GOLDEN_FILE = Path(__file__).with_name("golden_repos.json")
 WEB_MODEL = "us.anthropic.claude-sonnet-4-6"  # bedrock_model_id in infra/web/variables.tf
@@ -126,15 +126,23 @@ class MergeJudge(OutputEvaluator):
         return outputs
 
 
-def build_task(golden: list[dict], model_id: str):
+def build_task(golden: list[dict], model_id: str, merge: bool):
     repos = [to_repo(item) for item in golden]
     random.Random(SHUFFLE_SEED).shuffle(repos)
+    model = build_model(Provider.bedrock, model_id)
+    merge_factory = (lambda: make_merger(model)) if merge else None
 
     @eval_task()
     def categorize(case: Case) -> dict:
-        ask = make_asker(build_model(Provider.bedrock, model_id))
         try:
-            assignments = limit_categories(categorize_repos(repos, ask, batch_size=case.input["batch_size"]))
+            assignments = update_assignments(
+                repos,
+                {},
+                lambda: make_asker(model),
+                merge_factory=merge_factory,
+                batch_size=case.input["batch_size"],
+                log=lambda message: print(f"[{case.name}] {message}"),
+            )
         except Exception as error:  # Strands Evals swallows task errors, so show them before it does
             print(f"[ERROR] {case.name}: {error!r}", file=sys.stderr)
             raise
@@ -150,6 +158,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--model", default=os.environ.get("STARSORT_MODEL", WEB_MODEL), help="Bedrock model to categorize with")
     parser.add_argument("--judge-model", default=WEB_MODEL, help="Bedrock model for the AI judge; keep it fixed when comparing models")
+    parser.add_argument("--no-merge", action="store_true", help="skip the merge pass, like runs before #40")
     parser.add_argument("--save", type=Path, help="write the scores to this JSON file")
     args = parser.parse_args()
 
@@ -161,8 +170,9 @@ def main() -> int:
         GroupingCheck(groups),
         MergeJudge(rubric=MERGE_RUBRIC, model=build_model(Provider.bedrock, args.judge_model), include_inputs=False),
     ]
-    print(f"Categorizing {len(golden)} golden repos with {args.model}, judged by {args.judge_model} ({len(CASES)} cases)...")
-    Experiment(cases=CASES, evaluators=evaluators).run_evaluations(build_task(golden, args.model))
+    merge = "no merge pass" if args.no_merge else "with merge pass"
+    print(f"Categorizing {len(golden)} golden repos with {args.model} ({merge}), judged by {args.judge_model} ({len(CASES)} cases)...")
+    Experiment(cases=CASES, evaluators=evaluators).run_evaluations(build_task(golden, args.model, merge=not args.no_merge))
 
     for result in results:
         mark = "PASS" if result["passed"] else "FAIL"
@@ -175,7 +185,7 @@ def main() -> int:
 
     if args.save:
         args.save.parent.mkdir(parents=True, exist_ok=True)
-        summary = {"model": args.model, "judge_model": args.judge_model, "run_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "results": results}
+        summary = {"model": args.model, "judge_model": args.judge_model, "merge_pass": not args.no_merge, "run_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "results": results}
         args.save.write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         print(f"Saved to {args.save}")
     return 0 if passed else 1
