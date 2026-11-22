@@ -192,7 +192,9 @@ starsort --user <your-username> --sync-lists             # create/update your Gi
 - Lists it creates get the description "Managed by starsort". Repos move between those lists when their category changes.
 - **Your own lists are never touched.** If a list with the same name as a category already exists, starsort adds repos to it but never removes anything from it.
 - "Other" doesn't get a list.
-- Run with `--dry-run` first to see the plan.
+- **No empty lists.** A list is created only when its first repo goes in, and after a complete sync starsort deletes its own lists ("Managed by starsort") that ended up empty. Your own lists are never deleted.
+- **GitHub limits how fast lists can change** (about 80 changes a minute and 500 an hour). If a sync hits the limit, it stops cleanly: run it again later to finish.
+- Run with `--dry-run` first to see the plan, including the empty lists it would delete.
 
 **Publish it:** create a repo (e.g. `awesome-stars`), run starsort with `-o README.md` inside it, then commit and push. GitHub renders the list on the repo page.
 
@@ -212,7 +214,9 @@ Browser ──> CloudFront ──┬─ /*     ──> S3 (Angular site)
 ```
 
 - **Sign in with GitHub (OAuth).** The GitHub token is used once to read your public profile, then dropped. The session is a signed, HttpOnly cookie.
-- **Runs are background jobs.** The API queues the job, and the worker sorts your stars with the same code as the CLI and saves the result in DynamoDB.
+- **Runs are background jobs.** The API queues the job, and the worker sorts your stars with the same code as the CLI and saves the result in DynamoDB. The dashboard shows live progress, then the Markdown to copy or download.
+- **Sync to your GitHub Lists from the browser.** GitHub asks you once more for permission to edit your profile (the `user` scope). That token is used for one sync only and revoked as soon as it ends. You can make the new lists private, and a sync changes at most 300 repos to stay under GitHub's limits.
+- **Some organizations block apps like starsort** (GitHub's "OAuth App access restrictions", e.g. `awslabs`). The web app can't read or move their repos, so it skips them and says which organizations it skipped. The CLI uses your own token instead of an app, so it can still sort them.
 - **Free trial limits:** 1 run per GitHub account per week, up to the 500 newest stars, and a monthly AI spend cap that pauses runs for everyone.
 - **One address.** CloudFront serves the site and forwards `/api/*` to API Gateway, so the session cookie works without CORS.
 - **No secrets in code or Terraform state.** They live in SSM Parameter Store. All infrastructure is Terraform in [`infra/web/`](infra/web/).
@@ -242,6 +246,22 @@ npx ng test --watch=false
 
 To work on the site locally, `npx ng serve --proxy-config proxy.conf.json` forwards `/api` to the deployed site.
 
+### Evals: is the AI sorting well?
+
+Unit tests can't check AI output, because the model words things a little differently every run. The [`evals/`](evals/) folder scores it instead, with [Strands Evals](https://strandsagents.com/docs/user-guide/evals-sdk/index.md):
+
+- **Golden set:** [`evals/golden_repos.json`](evals/golden_repos.json) has 33 real repos, each tagged with the group it belongs to.
+- **Task:** the real categorizer sorts them twice: in one batch, and in batches of 8 (like a big account, where category names can drift between batches).
+- **Checks:** every repo gets a category, 5–15 categories, repos of the same group land together and different groups stay apart (category names don't matter), and an AI judge looks for near-duplicate categories such as "AI Agents" vs "AI Coding Assistants".
+
+```bash
+AWS_PROFILE=starsort-cli uv run python -m evals.run_evals                                    # print the scores
+AWS_PROFILE=starsort-cli uv run python -m evals.run_evals --save evals/results/baseline.json # keep them
+AWS_PROFILE=starsort-cli uv run python -m evals.run_evals --model <bedrock-model-id>         # compare models
+```
+
+The judge always uses Sonnet 4.6 (`--judge-model`), so runs with different models are graded the same way. Each run costs a few cents of Bedrock. Evals are for developers only: they are never deployed, and the web app never calls the judge. Scores move a little between runs, so compare big differences, not small ones. Saved results are in [`evals/results/`](evals/results/).
+
 ```text
 src/starsort/
   cli.py          Typer CLI: wires everything together
@@ -258,6 +278,7 @@ frontend/         Angular site: landing page and dashboard
 infra/            Terraform: budget alert (and a Bedrock-only IAM user)
 infra/web/        Terraform: the web app (Lambda, API Gateway, DynamoDB, S3, CloudFront)
 scripts/          build_layer.ps1 (worker dependencies), deploy_frontend.ps1 (upload the site)
+evals/            categorizer evals: golden set, scoring, Strands Evals runner, saved results
 tests/            pytest suite
 ```
 
@@ -268,8 +289,10 @@ tests/            pytest suite
 - [x] Sync categories to GitHub's native star **Lists**
 - [ ] GitHub Action that re-runs weekly and commits the updated list
 - [x] Hosted web version: GitHub sign-in, dashboard and free-trial limits
-- [ ] Start a run and see its progress and result in the browser
-- [ ] Sync GitHub star Lists from the web app
+- [x] Start a run and see its progress and result in the browser
+- [x] Sync GitHub star Lists from the web app, with automatic cleanup of empty lists
+- [x] Evals that score how well the AI sorts
+- [ ] Merge near-duplicate categories (measured with the evals)
 - [ ] CI/CD with GitHub Actions
 
 ## License
