@@ -2,15 +2,18 @@ from datetime import datetime, timezone
 
 from starsort.categorizer import (
     build_batch_prompt,
+    build_merge_prompt,
     categories_by_size,
     categorize_repos,
     group_assignments,
     group_by_language,
     limit_categories,
+    merge_categories,
     normalize_category,
+    plan_merges,
     update_assignments,
 )
-from starsort.models import BatchCategorization, Repo, RepoAssignment
+from starsort.models import BatchCategorization, CategoryMerge, CategoryMerges, Repo, RepoAssignment
 
 
 def make_repo(full_name: str, language: str | None = "Python", description: str | None = None) -> Repo:
@@ -198,3 +201,120 @@ def test_categories_by_size_orders_largest_first_and_skips_other():
     assignments = {"r/1": "B", "r/2": "A", "r/3": "A", "r/4": "Other", "r/5": "Other", "r/6": "Other"}
 
     assert categories_by_size(assignments) == ["A", "B"]
+
+
+# ---------- merge pass ----------
+
+COUNTS = {"CLI Tools": 5, "Developer Tools": 4, "AI Agents": 3, "AI Coding Assistants": 2, "AWS": 2}
+
+
+def merges(*groups: tuple[list[str], str]) -> CategoryMerges:
+    return CategoryMerges(merges=[CategoryMerge(names=names, into=into) for names, into in groups])
+
+
+class FakeMerger:
+    def __init__(self, answer: CategoryMerges | Exception):
+        self.answer = answer
+        self.prompts: list[str] = []
+
+    def __call__(self, prompt: str) -> CategoryMerges:
+        self.prompts.append(prompt)
+        if isinstance(self.answer, Exception):
+            raise self.answer
+        return self.answer
+
+
+def test_plan_keeps_the_ais_pick_among_new_names():
+    renames = plan_merges(merges((["CLI Tools", "Developer Tools"], "Developer Tools")).merges, COUNTS)
+
+    assert renames == {"CLI Tools": "Developer Tools"}
+
+
+def test_plan_keeps_a_name_from_an_earlier_run_over_the_ais_pick():
+    plan = merges((["AI Agents", "AI Coding Assistants"], "AI Coding Assistants")).merges
+
+    assert plan_merges(plan, COUNTS, preferred=["AI Agents"]) == {"AI Coding Assistants": "AI Agents"}
+
+
+def test_plan_falls_back_to_the_bigger_category_and_matches_names_case_insensitively():
+    renames = plan_merges(merges((["ai agents", " AI Coding Assistants "], "AI Stuff")).merges, COUNTS)
+
+    assert renames == {"AI Coding Assistants": "AI Agents"}
+
+
+def test_plan_ignores_unknown_names_other_and_single_name_groups():
+    plan = merges((["AWS", "Made Up"], "AWS"), (["AWS", "Other"], "Other"), (["AWS"], "AWS")).merges
+
+    assert plan_merges(plan, COUNTS) == {}
+
+
+def test_overlapping_merges_join_into_one_group():
+    plan = merges((["CLI Tools", "Developer Tools"], "Developer Tools"), (["Developer Tools", "AWS"], "Developer Tools")).merges
+
+    assert plan_merges(plan, COUNTS) == {"CLI Tools": "Developer Tools", "AWS": "Developer Tools"}
+
+
+def test_merge_prompt_lists_categories_by_size_with_a_few_examples():
+    repos = [make_repo(f"r/{i}", description=f"repo {i}") for i in range(5)]
+    assignments = {"r/0": "Big", "r/1": "Big", "r/2": "Big", "r/3": "Big", "r/4": "Other"}
+
+    prompt = build_merge_prompt(assignments, repos)
+
+    assert '"category": "Big"' in prompt and '"repo_count": 4' in prompt
+    assert '"full_name": "r/2"' in prompt and '"full_name": "r/3"' not in prompt
+    assert '"repo 0"' in prompt
+    assert "Other" not in prompt
+
+
+def test_merge_renames_repos_and_leaves_other_alone():
+    assignments = {"a/1": "CLI Tools", "a/2": "Developer Tools", "a/3": "Other"}
+    merge = FakeMerger(merges((["CLI Tools", "Developer Tools"], "Developer Tools")))
+
+    merged = merge_categories(assignments, [], merge)
+
+    assert merged == {"a/1": "Developer Tools", "a/2": "Developer Tools", "a/3": "Other"}
+
+
+def test_a_failed_merge_keeps_the_categories_and_says_why():
+    assignments = {"a/1": "CLI Tools", "a/2": "Developer Tools"}
+    messages: list[str] = []
+
+    assert merge_categories(assignments, [], FakeMerger(RuntimeError("bedrock down")), log=messages.append) == assignments
+    assert "bedrock down" in messages[0]
+
+
+def test_merge_logs_what_it_merged():
+    messages: list[str] = []
+    merge = FakeMerger(merges((["CLI Tools", "Developer Tools"], "Developer Tools")))
+
+    merge_categories({"a/1": "CLI Tools", "a/2": "Developer Tools"}, [], merge, log=messages.append)
+
+    assert messages == ["Merged categories: CLI Tools -> Developer Tools"]
+
+
+def test_one_category_needs_no_merge_call():
+    merge = FakeMerger(merges())
+
+    merge_categories({"a/1": "AWS", "a/2": "Other"}, [], merge)
+
+    assert merge.prompts == []
+
+
+def test_incremental_run_merges_a_new_near_duplicate_into_the_saved_category():
+    saved = {"old/agent": "AI Agents"}
+    ask = FakeAsker(answer({"new/assistant": "AI Coding Assistants"}))
+    merge = FakeMerger(merges((["AI Agents", "AI Coding Assistants"], "AI Coding Assistants")))
+
+    assignments = update_assignments(
+        [make_repo("new/assistant"), make_repo("old/agent")], saved, CountingFactory(ask), merge_factory=lambda: merge
+    )
+
+    assert assignments == {"old/agent": "AI Agents", "new/assistant": "AI Agents"}
+
+
+def test_nothing_new_means_no_merge_call_either():
+    merge = FakeMerger(merges())
+
+    update_assignments([make_repo("a/one")], {"a/one": "AWS"}, CountingFactory(FakeAsker()), merge_factory=lambda: merge)
+
+    assert merge.prompts == []

@@ -15,10 +15,10 @@ from typing import Any
 import boto3
 
 from starsort.cache import StarCache
-from starsort.categorizer import Asker, group_assignments
+from starsort.categorizer import Asker, Merger, group_assignments
 from starsort.github import GitHubError
 from starsort.github_lists import ListsError
-from starsort.providers import Provider, build_model, make_asker
+from starsort.providers import Provider, build_model, make_asker, make_merger
 from starsort.service import OrganizeOptions, organize, sync_github_lists
 from starsort.web import auth
 from starsort.web.jobs import LISTS, STALE_SECONDS, JobStore
@@ -102,13 +102,20 @@ def tables() -> Tables:
     )
 
 
-def priced_ask_factory(settings: WorkerSettings, spend: SpendCounter) -> Callable[[], Asker]:
-    """Bedrock asker that adds the cost of every call to this month's spend counter."""
-
+def priced_usage(settings: WorkerSettings, spend: SpendCounter) -> Callable[[int, int], None]:
     def record(input_tokens: int, output_tokens: int) -> None:
         spend.add(cost_micro_usd(input_tokens, output_tokens, settings.input_usd_per_million, settings.output_usd_per_million))
 
-    return lambda: make_asker(build_model(Provider.bedrock, settings.model_id), on_usage=record)
+    return record
+
+
+def priced_ask_factory(settings: WorkerSettings, spend: SpendCounter) -> Callable[[], Asker]:
+    """Bedrock asker that adds the cost of every call to this month's spend counter."""
+    return lambda: make_asker(build_model(Provider.bedrock, settings.model_id), on_usage=priced_usage(settings, spend))
+
+
+def priced_merge_factory(settings: WorkerSettings, spend: SpendCounter) -> Callable[[], Merger]:
+    return lambda: make_merger(build_model(Provider.bedrock, settings.model_id), on_usage=priced_usage(settings, spend))
 
 
 def start_refusal(job: dict[str, Any], db: Tables, settings: WorkerSettings) -> str | None:
@@ -120,7 +127,13 @@ def start_refusal(job: dict[str, Any], db: Tables, settings: WorkerSettings) -> 
     return None
 
 
-def run_job(job_id: str, db: Tables, settings: WorkerSettings, ask_factory: Callable[[], Asker] | None = None) -> None:
+def run_job(
+    job_id: str,
+    db: Tables,
+    settings: WorkerSettings,
+    ask_factory: Callable[[], Asker] | None = None,
+    merge_factory: Callable[[], Merger] | None = None,
+) -> None:
     job = db.jobs.get(job_id)
     if job is None or not db.jobs.start(job_id):
         logger.warning("Skipping job %s: not found or already started.", job_id)
@@ -141,11 +154,14 @@ def run_job(job_id: str, db: Tables, settings: WorkerSettings, ask_factory: Call
         model_id=settings.model_id,
         max_stars=MAX_STARS,
     )
+    if ask_factory is None:
+        ask_factory, merge_factory = priced_ask_factory(settings, db.spend), priced_merge_factory(settings, db.spend)
     try:
         result = organize(
             options,
             DynamoCacheStore(db.stars, owner_id),
-            ask_factory=ask_factory or priced_ask_factory(settings, db.spend),
+            ask_factory=ask_factory,
+            merge_factory=merge_factory,
             log=logger.info,
             on_batch=lambda done, total: db.jobs.progress(job_id, done, total),
         )

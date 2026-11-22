@@ -3,8 +3,8 @@ from types import SimpleNamespace
 import pytest
 from strands.types.exceptions import StructuredOutputException
 
-from starsort.models import BatchCategorization, RepoAssignment
-from starsort.providers import Provider, ProviderError, build_model, make_asker
+from starsort.models import BatchCategorization, CategoryMerges, RepoAssignment
+from starsort.providers import Provider, ProviderError, build_model, make_asker, make_merger
 
 GOOD_ANSWER = BatchCategorization(assignments=[RepoAssignment(full_name="a/one", category="AWS")])
 
@@ -62,6 +62,14 @@ def test_usage_is_reported_for_every_attempt_including_failed_ones():
     make_asker(model=None, agent_factory=factory, attempts=2, on_usage=lambda i, o: usage.append((i, o)))("prompt")
 
     assert usage == [(100, 20), (100, 20)]
+
+
+def test_merger_asks_for_category_merges():
+    no_merges = CategoryMerges(merges=[])
+    agents, factory = factory_for(no_merges)
+
+    assert make_merger(model=None, agent_factory=factory)("merge these") == no_merges
+    assert agents[0].calls == [("merge these", CategoryMerges)]
 
 
 def test_anthropic_provider_requires_api_key(monkeypatch):

@@ -27,3 +27,16 @@ class BatchCategorization(BaseModel):
     """Category assignments for one batch of GitHub repositories."""
 
     assignments: list[RepoAssignment] = Field(description="Exactly one entry for every repository in the input")
+
+
+class CategoryMerge(BaseModel):
+    """Categories a person would see as the same folder."""
+
+    names: list[str] = Field(description="Two or more category names from the input, copied exactly")
+    into: str = Field(description="The one name from `names` to keep: the broader, clearer one")
+
+
+class CategoryMerges(BaseModel):
+    """Near-duplicate categories to merge. Empty when every category is distinct."""
+
+    merges: list[CategoryMerge] = Field(description="One entry per group of categories to merge; empty if none")

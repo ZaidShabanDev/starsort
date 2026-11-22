@@ -1,0 +1,64 @@
+{
+  "model": "us.anthropic.claude-sonnet-4-6",
+  "judge_model": "us.anthropic.claude-sonnet-4-6",
+  "merge_pass": true,
+  "run_at": "2026-11-22T17:50:06+00:00",
+  "results": [
+    {
+      "case": "one batch",
+      "check": "coverage",
+      "score": 1.0,
+      "passed": true,
+      "reason": "missing: none; in Other: none"
+    },
+    {
+      "case": "one batch",
+      "check": "category count",
+      "score": 1.0,
+      "passed": true,
+      "reason": "10 categories (want 5-15)"
+    },
+    {
+      "case": "one batch",
+      "check": "grouping",
+      "score": 1.0,
+      "passed": true,
+      "reason": "together 100%, apart 100%; split: none; mixed: none"
+    },
+    {
+      "case": "one batch",
+      "check": "no near-duplicates (AI judge)",
+      "score": 1.0,
+      "passed": true,
+      "reason": "No two categories overlap enough to warrant merging. Developer Tools (CLI/code quality) and AI Agents (AI frameworks/agents) are sufficiently distinct. CSS & UI Frameworks vs. Data Visualization are clearly separate. All other category pairs are unambiguously different in content. No pairs should be merged."
+    },
+    {
+      "case": "small batches",
+      "check": "coverage",
+      "score": 1.0,
+      "passed": true,
+      "reason": "missing: none; in Other: none"
+    },
+    {
+      "case": "small batches",
+      "check": "category count",
+      "score": 1.0,
+      "passed": true,
+      "reason": "8 categories (want 5-15)"
+    },
+    {
+      "case": "small batches",
+      "check": "grouping",
+      "score": 0.9398148148148149,
+      "passed": true,
+      "reason": "together 94%, apart 94%; split: {'CSS': ['Developer Tools', 'Frontend & UI', 'Shaders & Graphics'], 'Databases': ['Databases', 'Developer Tools']}; mixed: {'Developer Tools': ['CSS', 'Databases', 'Developer tools'], 'Learning & Education': ['Developer portfolios', 'Learning'], 'Shaders & Graphics': ['CSS', 'Graphics']}"
+    },
+    {
+      "case": "small batches",
+      "check": "no near-duplicates (AI judge)",
+      "score": 0.5,
+      "passed": false,
+      "reason": "Exactly one pair of categories should be merged: \"Developer Tools\" and \"Frontend & UI\". Both `jgthms/bulma` (a CSS framework) in Developer Tools and `pure-css/pure` (also a CSS framework) in Frontend & UI are essentially the same type of tool. A person organizing their GitHub stars would merge these two categories together, as a single CSS/UI framework should not be split between them. No other category pairs show sufficient overlap to warrant merging."
+    }
+  ]
+}

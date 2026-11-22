@@ -3,8 +3,10 @@ from collections.abc import Callable
 from enum import Enum
 from typing import Any
 
-from starsort.categorizer import SYSTEM_PROMPT, Asker
-from starsort.models import BatchCategorization
+from pydantic import BaseModel
+
+from starsort.categorizer import MERGE_SYSTEM_PROMPT, SYSTEM_PROMPT, Asker, Merger
+from starsort.models import BatchCategorization, CategoryMerges
 
 MAX_OUTPUT_TOKENS = 16000
 
@@ -47,13 +49,15 @@ def build_model(provider: Provider, model_id: str | None = None) -> Any:
 OnUsage = Callable[[int, int], None]  # (input_tokens, output_tokens) of one agent call
 
 
-def make_asker(
+def make_structured_asker(
     model: Any,
+    output_model: type[BaseModel],
+    system_prompt: str,
     agent_factory: Callable[[], Any] | None = None,
     attempts: int = 2,
     on_usage: OnUsage | None = None,
-) -> Asker:
-    """Wrap a Strands agent as a function: prompt in, validated BatchCategorization out.
+) -> Callable[[str], Any]:
+    """Wrap a Strands agent as a function: prompt in, validated `output_model` out.
 
     `on_usage` is called after every attempt, failed ones too, because Bedrock bills those tokens as well.
     """
@@ -61,16 +65,16 @@ def make_asker(
     from strands.types.exceptions import StructuredOutputException
 
     def new_agent() -> Any:
-        return Agent(model=model, system_prompt=SYSTEM_PROMPT, callback_handler=None)
+        return Agent(model=model, system_prompt=system_prompt, callback_handler=None)
 
     factory = agent_factory or new_agent
 
-    def ask(prompt: str) -> BatchCategorization:
+    def ask(prompt: str) -> Any:
         last_error: StructuredOutputException | None = None
         for _ in range(attempts):
             agent = factory()  # fresh agent per call, so batches never share conversation history
             try:
-                return agent(prompt, structured_output_model=BatchCategorization).structured_output
+                return agent(prompt, structured_output_model=output_model).structured_output
             except StructuredOutputException as error:
                 last_error = error
             finally:
@@ -80,3 +84,11 @@ def make_asker(
         raise last_error
 
     return ask
+
+
+def make_asker(model: Any, agent_factory: Callable[[], Any] | None = None, attempts: int = 2, on_usage: OnUsage | None = None) -> Asker:
+    return make_structured_asker(model, BatchCategorization, SYSTEM_PROMPT, agent_factory, attempts, on_usage)
+
+
+def make_merger(model: Any, agent_factory: Callable[[], Any] | None = None, attempts: int = 2, on_usage: OnUsage | None = None) -> Merger:
+    return make_structured_asker(model, CategoryMerges, MERGE_SYSTEM_PROMPT, agent_factory, attempts, on_usage)
