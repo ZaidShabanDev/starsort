@@ -1,11 +1,11 @@
 # Uploads the built Angular site to the S3 bucket and clears the CloudFront cache.
-# First: `terraform apply` in infra/web (once), then `ng build` in frontend/. Needs AWS_PROFILE=admin (aws login).
+# First: `terraform apply` in infra/web (once), then `ng build` in frontend/. Needs AWS_PROFILE=admin (aws login), or the deploy role in GitHub Actions.
 
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
-$infra = Join-Path $root "infra\web"
-$dist = Join-Path $root "frontend\dist\starsort-web\browser"
+$infra = Join-Path $root "infra/web"
+$dist = Join-Path $root "frontend/dist/starsort-web/browser"
 
 if (-not (Test-Path (Join-Path $dist "index.html"))) { throw "No build found in $dist. Run 'ng build' in frontend first." }
 

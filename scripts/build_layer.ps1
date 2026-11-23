@@ -1,12 +1,12 @@
 # Builds the worker Lambda's dependencies layer into infra/web/build/layer/python.
-# Run from any folder before `terraform apply`, and again whenever uv.lock changes.
+# Run from any folder before `terraform apply`, and again whenever uv.lock changes. The deploy workflow runs it on Linux with pwsh.
 # Steps follow https://docs.astral.sh/uv/guides/integration/aws-lambda/ (Linux wheels, even when built on Windows).
 
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
-$build = Join-Path $root "infra\web\build"
-$target = Join-Path $build "layer\python"
+$build = Join-Path $root "infra/web/build"
+$target = Join-Path $build "layer/python"
 $requirements = Join-Path $build "layer-requirements.txt"
 
 if (Test-Path $target) { Remove-Item -Recurse -Force $target }
