@@ -1,0 +1,91 @@
+name: Deploy
+
+# Every merge to main that touches the app: run the checks, wait for approval, then deploy infra/web and the site.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "frontend/**"
+      - "infra/web/**"
+      - "scripts/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/**"
+  workflow_dispatch:
+
+# One deploy at a time; a newer one waits instead of cancelling a half-done apply.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    name: Deploy to AWS
+    needs: checks
+    runs-on: ubuntu-latest
+    # Required reviewers on this environment make the job wait for "Approve". The AWS role only trusts this environment.
+    environment:
+      name: production
+      url: ${{ steps.site.outputs.url }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.17.x"
+          terraform_wrapper: false # the wrapper adds text to stdout, which breaks `terraform output -raw`
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-west-2
+          mask-aws-account-id: true # public repo: Actions logs are public
+
+      - name: Build the worker's dependencies layer
+        shell: pwsh
+        run: |
+          uv python install 3.13
+          ./scripts/build_layer.ps1
+
+      - name: Terraform init
+        run: terraform -chdir=infra/web init -input=false -backend-config="bucket=$TF_STATE_BUCKET"
+
+      - name: Terraform apply
+        run: terraform -chdir=infra/web apply -input=false -auto-approve
+
+      - name: Build the site
+        working-directory: frontend
+        run: |
+          npm ci
+          npx ng build
+
+      - name: Upload the site
+        shell: pwsh
+        run: ./scripts/deploy_frontend.ps1
+
+      - name: Site address
+        id: site
+        run: echo "url=$(terraform -chdir=infra/web output -raw site_url)" >> "$GITHUB_OUTPUT"

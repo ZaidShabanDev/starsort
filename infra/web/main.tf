@@ -12,9 +12,15 @@ data "aws_iam_policy_document" "lambda_assume_role" {
   }
 }
 
+# Created in infra/ci.tf. The GitHub deploy role can only create or change roles that have it.
+locals {
+  permissions_boundary_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${var.name_prefix}-boundary"
+}
+
 resource "aws_iam_role" "api" {
-  name               = "${var.name_prefix}-api"
-  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+  name                 = "${var.name_prefix}-api"
+  assume_role_policy   = data.aws_iam_policy_document.lambda_assume_role.json
+  permissions_boundary = local.permissions_boundary_arn
 }
 
 resource "aws_cloudwatch_log_group" "api" {
@@ -103,6 +109,9 @@ data "archive_file" "api" {
   source_dir  = "${path.module}/../../src"
   excludes    = ["**/__pycache__/**", "**/*.pyc"]
   output_path = "${path.module}/build/api.zip"
+
+  # File modes differ between Windows and Linux; a fixed mode keeps the zip hash the same on this PC and in CI.
+  output_file_mode = "0666"
 }
 
 resource "aws_lambda_function" "api" {
@@ -194,9 +203,10 @@ resource "aws_dynamodb_table" "spend" {
 
 # Built by scripts/build_layer.ps1, which must run before plan/apply.
 data "archive_file" "layer" {
-  type        = "zip"
-  source_dir  = "${path.module}/build/layer"
-  output_path = "${path.module}/build/layer.zip"
+  type             = "zip"
+  source_dir       = "${path.module}/build/layer"
+  output_path      = "${path.module}/build/layer.zip"
+  output_file_mode = "0666"
 }
 
 resource "aws_lambda_layer_version" "dependencies" {
@@ -209,8 +219,9 @@ resource "aws_lambda_layer_version" "dependencies" {
 }
 
 resource "aws_iam_role" "worker" {
-  name               = "${var.name_prefix}-worker"
-  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+  name                 = "${var.name_prefix}-worker"
+  assume_role_policy   = data.aws_iam_policy_document.lambda_assume_role.json
+  permissions_boundary = local.permissions_boundary_arn
 }
 
 resource "aws_cloudwatch_log_group" "worker" {
