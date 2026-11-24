@@ -25,6 +25,7 @@ LIMIT_MESSAGES = {
     "running": "A job is already running for your account. Wait for it to finish.",
     "weekly": "The free trial allows one run per week.",  # the UI shows the date from retry_at
 }
+DELETE_BUSY_MESSAGE = "A job is running. Wait for it to finish, then delete your data."
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,11 @@ def job_store() -> jobs.JobStore:
 @lru_cache(maxsize=1)
 def usage_store() -> limits.UsageStore:
     return limits.UsageStore(boto3.resource("dynamodb").Table(os.environ["USAGE_TABLE"]))
+
+
+@lru_cache(maxsize=1)
+def stars_table() -> Any:
+    return boto3.resource("dynamodb").Table(os.environ["STARS_TABLE"])
 
 
 @lru_cache(maxsize=1)
@@ -265,6 +271,20 @@ def me(event: dict[str, Any]) -> dict[str, Any]:
     return json_response(200, {**profile, "trial": trial_status(user)})
 
 
+def delete_my_data(event: dict[str, Any]) -> dict[str, Any]:
+    """Deletes the user's saved stars and jobs, then signs them out. GitHub Lists are not touched."""
+    user = current_user(event)
+    if user is None:
+        return not_signed_in()
+    owner_id = str(user["id"])
+    # Refused while a job runs: the worker would write the stars back right after.
+    if not usage_store().forget_jobs(owner_id):
+        return json_response(409, {"error": DELETE_BUSY_MESSAGE})
+    deleted_jobs = job_store().delete_for_owner(owner_id)
+    stars_table().delete_item(Key={"owner_id": owner_id})
+    return json_response(200, {"deleted_jobs": deleted_jobs}, [sessions.clear_cookie(sessions.SESSION_COOKIE)])
+
+
 def create_job(event: dict[str, Any]) -> dict[str, Any]:
     user = current_user(event)
     if user is None:
@@ -323,6 +343,7 @@ ROUTES = {
     "POST /api/auth/logout": logout,
     "GET /api/auth/lists": lists_connect,
     "GET /api/me": me,
+    "DELETE /api/me/data": delete_my_data,
     "POST /api/jobs": create_job,
     "GET /api/jobs/latest": latest_job,  # API Gateway matches this fixed path before {job_id}
     "GET /api/jobs/{job_id}": get_job,

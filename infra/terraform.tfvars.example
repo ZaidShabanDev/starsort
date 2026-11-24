@@ -6,3 +6,9 @@ alert_email = "you@example.com"
 # aws_region         = "us-west-2"
 # iam_user_name      = "starsort"
 # monthly_budget_usd = "55"
+
+# For your own fork's GitHub Actions deploy. IDs: "owner.id" and "id" from https://api.github.com/repos/OWNER/REPO
+# github_owner    = "you"
+# github_repo     = "starsort"
+# github_owner_id = "123"
+# github_repo_id  = "456"

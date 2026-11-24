@@ -19,6 +19,7 @@ RUN = "run"  # sort the stars with AI
 LISTS = "lists"  # copy the categories to the user's GitHub star Lists
 
 KEEP_SECONDS = 30 * 24 * 60 * 60  # DynamoDB TTL deletes a job this long after it was created
+OWNER_INDEX = "by-owner"  # job IDs per user, so "Delete my data" finds every job without scanning the table
 STALE_SECONDS = 20 * 60  # longer than the worker's 15-minute Lambda limit, so a job this quiet has died
 RESULT_FIELDS = ("markdown", "categories", "repo_count", "new_repo_count")
 SYNC_FIELDS = ("lists_created", "lists_deleted", "repos_updated", "repos_to_update", "repos_skipped", "skipped_orgs", "complete")
@@ -67,6 +68,28 @@ class JobStore:
 
     def fail(self, job_id: str, message: str) -> None:
         self._update(job_id, {"status": FAILED, "error": message})
+
+    def ids_for_owner(self, owner_id: str) -> list[str]:
+        job_ids: list[str] = []
+        page_start: dict[str, Any] | None = None
+        while True:
+            page = self.table.query(
+                IndexName=OWNER_INDEX,
+                KeyConditionExpression="#owner = :owner",
+                ExpressionAttributeNames={"#owner": "owner_id"},
+                ExpressionAttributeValues={":owner": owner_id},
+                **({"ExclusiveStartKey": page_start} if page_start else {}),
+            )
+            job_ids += [item["job_id"] for item in page["Items"]]
+            page_start = page.get("LastEvaluatedKey")
+            if not page_start:
+                return job_ids
+
+    def delete_for_owner(self, owner_id: str) -> int:
+        job_ids = self.ids_for_owner(owner_id)
+        for job_id in job_ids:
+            self.table.delete_item(Key={"job_id": job_id})
+        return len(job_ids)
 
     def _update(self, job_id: str, fields: dict[str, Any], only_if_status: str | None = None) -> bool:
         fields = {**fields, "updated_at": int(time.time())}

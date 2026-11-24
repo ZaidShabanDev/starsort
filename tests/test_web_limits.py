@@ -130,6 +130,30 @@ def test_last_sync_is_remembered_apart_from_the_last_run(usage):
     assert (usage.last_job_id("1"), usage.last_job_id("1", kind="lists")) == ("run-1", "sync-1")
 
 
+def test_forget_jobs_drops_job_links_but_keeps_the_weekly_limit(usage):
+    usage.try_start("1", now=NOW)
+    usage.remember_job("1", "run-1")
+    usage.remember_job("1", "sync-1", kind="lists")
+    usage.finish("1")
+
+    assert usage.forget_jobs("1", now=NOW + 60) is True
+    assert (usage.last_job_id("1"), usage.last_job_id("1", kind="lists")) == (None, None)
+    assert usage.try_start("1", now=NOW + 120).reason == "weekly"
+
+
+def test_forget_jobs_is_refused_while_a_job_runs(usage):
+    usage.try_start("1", now=NOW)
+    usage.remember_job("1", "run-1")
+
+    assert usage.forget_jobs("1", now=NOW + 60) is False
+    assert usage.last_job_id("1") == "run-1"
+
+
+def test_forget_jobs_for_unknown_user_does_nothing(usage, usage_table):
+    assert usage.forget_jobs("nobody") is True
+    assert usage_table.items == {}
+
+
 def test_finish_for_unknown_user_does_nothing(usage, usage_table):
     usage.finish("nobody")
 

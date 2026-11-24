@@ -221,14 +221,20 @@ Browser ──> CloudFront ──┬─ /*     ──> S3 (Angular site)
 - **Free trial limits:** 1 run per GitHub account per week, up to the 500 newest stars, and a monthly AI spend cap that pauses runs for everyone.
 - **One address.** CloudFront serves the site and forwards `/api/*` to API Gateway, so the session cookie works without CORS.
 - **No secrets in code or Terraform state.** They live in SSM Parameter Store. All infrastructure is Terraform in [`infra/web/`](infra/web/).
+- **Your data, your choice.** The [privacy page](frontend/src/app/pages/privacy/privacy.html) says what is kept and for how long. "Delete my data" on the dashboard removes your saved stars and runs. It keeps only your GitHub ID and last run time, so the weekly limit still works.
+- **Alarms by email.** CloudWatch alarms watch for crashed or failed runs, runs close to Lambda's 15-minute limit, dropped runs and API errors.
+- **CI/CD with GitHub Actions.** Every pull request runs the Python tests, the Angular tests and build, and Terraform checks. A merge to `main` deploys after a manual approval. GitHub gets short-lived AWS credentials through OIDC, so no AWS keys are stored in GitHub.
 
-**Deploy your own** (needs an AWS account, a GitHub OAuth App, Terraform, Node 24 and PowerShell for the scripts):
+**Deploy your own** (needs an AWS account, a GitHub OAuth App, Terraform 1.11+, Node 24 and PowerShell for the scripts; run Terraform with `AWS_PROFILE=admin`):
 
 1. In the SSM Parameter Store console, create two `SecureString` parameters: `/starsort/web/github-client-secret` (your OAuth App's client secret) and `/starsort/web/session-secret` (a long random string). Using the console keeps the secrets out of your shell history.
-2. Build the worker's dependencies layer: `./scripts/build_layer.ps1`
-3. In [`infra/web/variables.tf`](infra/web/variables.tf), set `github_client_id` and `unlimited_logins` to your own, then run `terraform init` and `terraform apply` in `infra/web` (with `AWS_PROFILE=admin`).
-4. Set the OAuth App's callback URL to the `oauth_callback_url` output.
-5. Build and upload the site: `npm ci` and `npx ng build` in `frontend/`, then `./scripts/deploy_frontend.ps1`. Open the `site_url` output.
+2. In `infra/`, copy `terraform.tfvars.example` to `terraform.tfvars` and fill it in, then run `terraform init` and `terraform apply`. This creates the budget alert, the alarm email topic (click the link in the confirmation email), the Terraform state bucket and the GitHub deploy role.
+3. Build the worker's dependencies layer: `./scripts/build_layer.ps1`
+4. In [`infra/web/variables.tf`](infra/web/variables.tf), set `github_client_id` and `unlimited_logins` to your own. Then in `infra/web`, run `terraform init -backend-config="bucket=<tfstate_bucket output from infra/>"` and `terraform apply`.
+5. Set the OAuth App's callback URL to the `oauth_callback_url` output.
+6. Build and upload the site: `npm ci` and `npx ng build` in `frontend/`, then `./scripts/deploy_frontend.ps1`. Open the `site_url` output.
+
+**Automatic deploys after that:** in your GitHub repo, create an environment named `production` with yourself as a required reviewer and only `main` allowed to deploy. Add two environment secrets from the `infra/` outputs: `AWS_DEPLOY_ROLE_ARN` (`github_deploy_role_arn`) and `TF_STATE_BUCKET` (`tfstate_bucket`). From then on, every merge to `main` that changes the app runs [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) after you approve it.
 
 ## Development
 
@@ -276,9 +282,10 @@ src/starsort/
   markdown.py     awesome-list rendering
   models.py       Pydantic models
   web/            Lambda code: api.py (HTTP API), worker.py (runs jobs), auth.py, sessions.py, jobs.py, limits.py
-frontend/         Angular site: landing page and dashboard
-infra/            Terraform: budget alert (and a Bedrock-only IAM user)
-infra/web/        Terraform: the web app (Lambda, API Gateway, DynamoDB, S3, CloudFront)
+frontend/         Angular site: landing page, dashboard and privacy page
+infra/            Terraform, applied by hand: budget alert, alarm email, state bucket, GitHub deploy role (and a Bedrock-only IAM user)
+infra/web/        Terraform, applied by CI: the web app (Lambda, API Gateway, DynamoDB, S3, CloudFront, alarms)
+.github/          GitHub Actions: ci.yml (checks on every PR), deploy.yml (deploy on merge to main)
 scripts/          build_layer.ps1 (worker dependencies), deploy_frontend.ps1 (upload the site)
 evals/            categorizer evals: golden set, scoring, Strands Evals runner, saved results
 tests/            pytest suite
@@ -294,8 +301,9 @@ tests/            pytest suite
 - [x] Start a run and see its progress and result in the browser
 - [x] Sync GitHub star Lists from the web app, with automatic cleanup of empty lists
 - [x] Evals that score how well the AI sorts
-- [ ] Merge near-duplicate categories (measured with the evals)
-- [ ] CI/CD with GitHub Actions
+- [x] Merge near-duplicate categories (measured with the evals)
+- [x] CI/CD with GitHub Actions
+- [x] Privacy page, "Delete my data" and CloudWatch alarms
 
 ## License
 

@@ -4,6 +4,9 @@
 </header>
 
 <main class="page">
+  @if (dataDeleted) {
+    <p class="banner deleted" data-tone="ok" role="status"><strong>Done.</strong> Your data was deleted and you are signed out.</p>
+  }
   <section class="hero">
     <span class="badge">Free trial</span>
     <h1 class="hero__title">Your GitHub stars, <span class="hero__highlight">sorted.</span></h1>

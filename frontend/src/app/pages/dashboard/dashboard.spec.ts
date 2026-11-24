@@ -107,6 +107,49 @@ describe('Dashboard', () => {
     expect(banner(page).dataset['tone']).toBe('wait');
   });
 
+  function button(page: HTMLElement, text: string): HTMLButtonElement {
+    return Array.from(page.querySelectorAll('button')).find((element) => element.textContent?.trim() === text) as HTMLButtonElement;
+  }
+
+  it('asks before deleting the data, and cancel changes nothing', async () => {
+    const page = await render((request) => request.flush(user()));
+
+    button(page, 'Delete my data').click();
+    fixture.detectChanges();
+    expect(page.textContent).toContain('Your GitHub Lists and stars stay as they are');
+
+    button(page, 'Cancel').click();
+    fixture.detectChanges();
+    expect(button(page, 'Delete my data')).toBeTruthy();
+    http.expectNone({ method: 'DELETE', url: '/api/me/data' });
+  });
+
+  it('deletes the data and goes to the landing page', async () => {
+    const page = await render((request) => request.flush(user()));
+
+    button(page, 'Delete my data').click();
+    fixture.detectChanges();
+    button(page, 'Yes, delete').click();
+    http.expectOne({ method: 'DELETE', url: '/api/me/data' }).flush({ deleted_jobs: 2 });
+
+    expect(router.navigateByUrl).toHaveBeenCalledWith('/?deleted=1');
+  });
+
+  it('shows why the data was not deleted', async () => {
+    const page = await render((request) => request.flush(user()));
+
+    button(page, 'Delete my data').click();
+    fixture.detectChanges();
+    button(page, 'Yes, delete').click();
+    http
+      .expectOne({ method: 'DELETE', url: '/api/me/data' })
+      .flush({ error: 'A job is running. Wait for it to finish, then delete your data.' }, { status: 409, statusText: 'Conflict' });
+    fixture.detectChanges();
+
+    expect(page.querySelector('[role="alert"]')?.textContent).toContain('A job is running');
+    expect(router.navigateByUrl).not.toHaveBeenCalled();
+  });
+
   it('signs out and returns to the landing page', async () => {
     const page = await render((request) => request.flush(user()));
 

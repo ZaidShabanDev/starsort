@@ -25,6 +25,20 @@
   font-family: var(--font-mono);
 }
 
+.data__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.data__error {
+  margin: 1.25rem 0 0;
+}
+
+.btn--danger:not(:disabled) {
+  background: var(--coral);
+}
+
 .loading {
   font-family: var(--font-mono);
 }

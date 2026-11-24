@@ -144,6 +144,28 @@ class UsageStore:
             ExpressionAttributeValues={":job": job_id},
         )
 
+    def forget_jobs(self, owner_id: str, now: float | None = None) -> bool:
+        """For "Delete my data". Keeps the run times, so deleting can't reset the weekly limit. False while a job runs."""
+        now = int(time.time() if now is None else now)
+        item = self.table.get_item(Key={"owner_id": owner_id}).get("Item")
+        if item is None:
+            return True
+        if int(item["active_until"]) > now:
+            return False
+        try:
+            self.table.update_item(
+                Key={"owner_id": owner_id},
+                UpdateExpression="REMOVE #run, #sync",
+                ConditionExpression="#active = :active",  # a job that started since the read wins
+                ExpressionAttributeNames={"#run": LAST_JOB_FIELDS[RUN], "#sync": LAST_JOB_FIELDS[LISTS], "#active": "active_until"},
+                ExpressionAttributeValues={":active": item["active_until"]},
+            )
+        except ClientError as error:
+            if _condition_failed(error):
+                return False
+            raise
+        return True
+
     def last_job_id(self, owner_id: str, kind: str = RUN) -> str | None:
         item = self.table.get_item(Key={"owner_id": owner_id}).get("Item")
         return item.get(LAST_JOB_FIELDS[kind]) if item else None

@@ -95,6 +95,12 @@ data "aws_iam_policy_document" "api_jobs" {
     actions   = ["dynamodb:GetItem"]
     resources = [aws_dynamodb_table.spend.arn]
   }
+
+  statement {
+    sid       = "DeleteMyData"
+    actions   = ["dynamodb:Query", "dynamodb:DeleteItem"]
+    resources = [aws_dynamodb_table.jobs.arn, "${aws_dynamodb_table.jobs.arn}/index/by-owner", aws_dynamodb_table.stars.arn]
+  }
 }
 
 resource "aws_iam_role_policy" "api_jobs" {
@@ -131,6 +137,7 @@ resource "aws_lambda_function" "api" {
       SESSION_SECRET_PARAM       = "${var.ssm_prefix}/session-secret"
       JOBS_TABLE                 = aws_dynamodb_table.jobs.name
       WORKER_FUNCTION            = aws_lambda_function.worker.function_name
+      STARS_TABLE                = aws_dynamodb_table.stars.name
       USAGE_TABLE                = aws_dynamodb_table.usage.name
       SPEND_TABLE                = aws_dynamodb_table.spend.name
       MONTHLY_SPEND_CAP_USD      = var.monthly_spend_cap_usd
@@ -155,6 +162,22 @@ resource "aws_dynamodb_table" "jobs" {
   attribute {
     name = "job_id"
     type = "S"
+  }
+
+  attribute {
+    name = "owner_id"
+    type = "S"
+  }
+
+  # Keys only: "Delete my data" needs just the job IDs, so the index stays tiny.
+  global_secondary_index {
+    name            = "by-owner"
+    projection_type = "KEYS_ONLY"
+
+    key_schema {
+      attribute_name = "owner_id"
+      key_type       = "HASH"
+    }
   }
 
   ttl {
@@ -352,7 +375,7 @@ resource "aws_apigatewayv2_route" "health" {
 }
 
 resource "aws_apigatewayv2_route" "auth" {
-  for_each = toset(["GET /api/auth/login", "GET /api/auth/callback", "POST /api/auth/logout", "GET /api/auth/lists", "GET /api/me"])
+  for_each = toset(["GET /api/auth/login", "GET /api/auth/callback", "POST /api/auth/logout", "GET /api/auth/lists", "GET /api/me", "DELETE /api/me/data"])
 
   api_id    = aws_apigatewayv2_api.http.id
   route_key = each.value
