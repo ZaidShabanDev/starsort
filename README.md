@@ -293,18 +293,6 @@ tests/            pytest suite
 
 **Strands docs in your editor:** the repo ships a `.mcp.json` that connects the Strands Agents docs MCP server (`strands-agents-mcp-server`, run with `uvx`). MCP-aware tools like Claude Code pick it up automatically, so coding assistants can look up the current Strands API instead of guessing.
 
-## Roadmap
-
-- [x] Sync categories to GitHub's native star **Lists**
-- [ ] GitHub Action that re-runs weekly and commits the updated list
-- [x] Hosted web version: GitHub sign-in, dashboard and free-trial limits
-- [x] Start a run and see its progress and result in the browser
-- [x] Sync GitHub star Lists from the web app, with automatic cleanup of empty lists
-- [x] Evals that score how well the AI sorts
-- [x] Merge near-duplicate categories (measured with the evals)
-- [x] CI/CD with GitHub Actions
-- [x] Privacy page, "Delete my data" and CloudWatch alarms
-
 ## License
 
 [MIT](LICENSE)
