@@ -1,0 +1,29 @@
+.privacy {
+  display: grid;
+  gap: 1.5rem;
+  max-width: 760px;
+}
+
+.privacy__title {
+  font: 800 clamp(2rem, 6vw, 3.25rem) / 1.05 var(--font-display);
+}
+
+.privacy__lead {
+  margin-bottom: 0;
+  font-size: 1.15rem;
+}
+
+.card {
+  ul {
+    margin: 0;
+    padding-left: 1.25rem;
+  }
+
+  li + li {
+    margin-top: 0.5rem;
+  }
+
+  p {
+    margin-bottom: 0;
+  }
+}

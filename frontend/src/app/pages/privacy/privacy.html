@@ -1,0 +1,67 @@
+<header class="topbar">
+  <a class="logo" routerLink="/">★ starsort</a>
+  <app-theme-switch />
+</header>
+
+<main class="page privacy">
+  <section>
+    <h1 class="privacy__title">Privacy</h1>
+    <p class="privacy__lead">What Starsort reads, what it keeps, and how to delete it.</p>
+  </section>
+
+  <section class="card">
+    <h2>What Starsort reads</h2>
+    <ul>
+      <li>Your public GitHub profile: login, name and avatar.</li>
+      <li>Your public starred repos: names, descriptions, topics and languages.</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2>What it keeps</h2>
+    <ul>
+      <li>Your starred repos and their categories, so the next run only sends new stars to the AI. Kept until you delete them.</li>
+      <li>Each run's result, deleted after 30 days.</li>
+      <li>
+        Your GitHub ID number and when you last ran Starsort, for the 1-run-per-week limit.
+        This stays after you delete your data, so the limit still works.
+      </li>
+      <li>Server logs, which can include your repo names, deleted after 14 days.</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2>What it never keeps</h2>
+    <p>
+      Your GitHub token. The sign-in token is used once to read your profile, then dropped.
+      The token for syncing Lists is used for one sync, then revoked.
+    </p>
+  </section>
+
+  <section class="card">
+    <h2>Cookies</h2>
+    <p>One signed sign-in cookie that lasts 8 hours. No ads, tracking or analytics.</p>
+  </section>
+
+  <section class="card">
+    <h2>AI</h2>
+    <p>
+      Repo names, descriptions and topics (all public) are sent to Claude on Amazon Bedrock in the US.
+      AWS does not share them with Anthropic. AWS may keep them for safety and abuse checks.
+    </p>
+  </section>
+
+  <section class="card">
+    <h2>Delete your data</h2>
+    <ul>
+      <li>
+        On your <a routerLink="/dashboard">dashboard</a>, click "Delete my data". It deletes your saved stars and runs,
+        and signs you out. Your GitHub Lists and stars are not changed.
+      </li>
+      <li>
+        To remove Starsort's access to your GitHub account, revoke it under
+        <a [href]="githubAppsUrl" target="_blank" rel="noopener">GitHub settings → Applications</a>.
+      </li>
+    </ul>
+  </section>
+</main>

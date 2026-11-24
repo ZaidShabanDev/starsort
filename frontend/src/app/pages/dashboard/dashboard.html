@@ -32,6 +32,29 @@
     </section>
 
     <app-run-panel [trial]="trial" (trialChanged)="loadMe()" />
+
+    <section class="card data" aria-labelledby="data-title">
+      <h2 id="data-title">Your data</h2>
+      <p>
+        Starsort keeps your starred repos, their categories and your runs, so your next run only sorts new stars.
+        <a routerLink="/privacy">What Starsort keeps</a>
+      </p>
+      @if (confirmingDelete()) {
+        <p>
+          <strong>Delete your saved stars and runs, and sign out?</strong>
+          Your GitHub Lists and stars stay as they are, and the weekly run limit still applies.
+        </p>
+        <div class="data__actions">
+          <button type="button" class="btn btn--small btn--danger" [disabled]="deleting()" (click)="deleteMyData()">Yes, delete</button>
+          <button type="button" class="btn btn--small btn--plain" [disabled]="deleting()" (click)="confirmingDelete.set(false)">Cancel</button>
+        </div>
+      } @else {
+        <button type="button" class="btn btn--small btn--danger" (click)="confirmingDelete.set(true)">Delete my data</button>
+      }
+      @if (deleteError(); as message) {
+        <p class="banner data__error" data-tone="stop" role="alert"><strong>Not deleted.</strong> {{ message }}</p>
+      }
+    </section>
   } @else if (error()) {
     <p class="banner" data-tone="stop" role="alert"><strong>Error.</strong> {{ error() }}</p>
   } @else {

@@ -185,11 +185,12 @@ CAP = 50_000_000
 
 
 @pytest.fixture
-def job_api(monkeypatch, settings, jobs_table, usage_table, spend_table):
+def job_api(monkeypatch, settings, jobs_table, usage_table, spend_table, stars_table):
     """Real stores on in-memory tables; records worker starts instead of invoking Lambda."""
     started = []
     monkeypatch.setattr(api, "job_store", lambda: JobStore(jobs_table))
     monkeypatch.setattr(api, "usage_store", lambda: UsageStore(usage_table))
+    monkeypatch.setattr(api, "stars_table", lambda: stars_table)
     monkeypatch.setattr(api, "spend_counter", lambda: SpendCounter(spend_table))
     monkeypatch.setattr(api, "load_limits", lambda: Limits(CAP, frozenset({"boss"})))
     monkeypatch.setattr(api, "start_worker", started.append)
@@ -358,6 +359,52 @@ def test_latest_job_shows_a_run_whose_worker_could_not_start(monkeypatch, job_ap
 
 def test_latest_job_needs_a_session(job_api):
     response = handler(event("GET /api/jobs/latest"), context=None)
+
+    assert response["statusCode"] == 401
+
+
+# ---------- delete my data ----------
+
+
+def delete_data(user: dict = USER) -> dict:
+    return handler(event("DELETE /api/me/data", cookies=[session_cookie_for(user)]), context=None)
+
+
+def test_delete_my_data_removes_stars_and_jobs_and_signs_out(job_api, jobs_table, usage_table, stars_table):
+    post_job()
+    usage_table.items["1"]["active_until"] = 0
+    stars_table.items["1"] = {"owner_id": "1", "data": b"stars"}
+    stars_table.items["2"] = {"owner_id": "2", "data": b"other user"}
+
+    response = delete_data()
+
+    assert (response["statusCode"], json.loads(response["body"])) == (200, {"deleted_jobs": 1})
+    assert jobs_table.items == {}
+    assert list(stars_table.items) == ["2"]
+    assert response["cookies"][0].startswith(f"{sessions.SESSION_COOKIE}=;")
+    assert get_latest()[0] == 404
+
+
+def test_delete_my_data_keeps_the_weekly_limit(job_api, usage_table):
+    post_job()
+    usage_table.items["1"]["active_until"] = 0
+
+    delete_data()
+
+    assert post_job()[1]["reason"] == "weekly"
+
+
+def test_delete_my_data_waits_for_a_running_job(job_api, jobs_table):
+    post_job()
+
+    response = delete_data()
+
+    assert (response["statusCode"], json.loads(response["body"])["error"]) == (409, api.DELETE_BUSY_MESSAGE)
+    assert len(jobs_table.items) == 1
+
+
+def test_delete_my_data_needs_a_session(job_api):
+    response = handler(event("DELETE /api/me/data"), context=None)
 
     assert response["statusCode"] == 401
 

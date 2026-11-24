@@ -53,7 +53,7 @@ data "aws_iam_policy_document" "web_boundary" {
 
   statement {
     sid       = "WebTables"
-    actions   = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem"]
+    actions   = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:DeleteItem", "dynamodb:Query"]
     resources = ["arn:aws:dynamodb:${var.aws_region}:${local.account_id}:table/${var.web_name_prefix}-*"]
   }
 
@@ -200,13 +200,27 @@ data "aws_iam_policy_document" "github_deploy" {
   }
 
   statement {
+    sid = "WebAlarms"
+    actions = [
+      "cloudwatch:PutMetricAlarm",
+      "cloudwatch:DeleteAlarms",
+      "cloudwatch:ListTagsForResource",
+      "cloudwatch:TagResource",
+      "cloudwatch:UntagResource",
+    ]
+    resources = ["arn:aws:cloudwatch:${var.aws_region}:${local.account_id}:alarm:${var.web_name_prefix}-*"]
+  }
+
+  statement {
     sid = "ReadOnlyLookups"
     actions = [
       "cloudfront:Get*",
       "cloudfront:List*",
+      "cloudwatch:DescribeAlarms",
       "kms:DescribeKey",
       "kms:ListAliases",
       "logs:DescribeLogGroups",
+      "logs:DescribeMetricFilters",
     ]
     resources = ["*"]
   }
@@ -266,4 +280,17 @@ resource "aws_iam_role_policy" "github_deploy" {
   name   = "deploy-web"
   role   = aws_iam_role.github_deploy.id
   policy = data.aws_iam_policy_document.github_deploy.json
+}
+
+# ---------- Alarm emails for infra/web ----------
+
+resource "aws_sns_topic" "alerts" {
+  name = "starsort-alerts"
+}
+
+# AWS emails a confirmation link first; alarms only arrive after it is clicked.
+resource "aws_sns_topic_subscription" "alerts_email" {
+  topic_arn = aws_sns_topic.alerts.arn
+  protocol  = "email"
+  endpoint  = var.alert_email
 }

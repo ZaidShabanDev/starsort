@@ -70,6 +70,12 @@ variable "unlimited_logins" {
   default     = ["ZaidShabanDev"]
 }
 
+variable "alerts_topic_name" {
+  description = "SNS topic in infra/ that emails the alarms. Created there because the email address lives in infra/terraform.tfvars."
+  type        = string
+  default     = "starsort-alerts"
+}
+
 variable "throttle_burst" {
   description = "Short burst limit for the whole API."
   type        = number

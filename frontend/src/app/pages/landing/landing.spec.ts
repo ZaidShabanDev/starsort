@@ -1,7 +1,7 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
+import { Router, provideRouter } from '@angular/router';
 import { Landing } from './landing';
 
 describe('Landing', () => {
@@ -46,6 +46,19 @@ describe('Landing', () => {
 
     expect(links(page)).toContain('/dashboard');
     expect(links(page)).not.toContain('/api/auth/login');
+  });
+
+  it('confirms when the user just deleted their data', async () => {
+    await TestBed.inject(Router).navigateByUrl('/?deleted=1');
+    const page = await render(false);
+
+    expect(page.querySelector('[role="status"]')?.textContent).toContain('Your data was deleted');
+  });
+
+  it('shows no deleted message on a normal visit', async () => {
+    const page = await render(false);
+
+    expect(page.querySelector('[role="status"]')).toBeNull();
   });
 
   it('shows the free trial rules', async () => {

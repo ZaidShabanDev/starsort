@@ -79,6 +79,11 @@ export class StarsortApi {
     return this.http.post('/api/auth/logout', null);
   }
 
+  /** Deletes the saved stars and runs and signs out. 409 while a job runs. GitHub Lists are not touched. */
+  deleteMyData(): Observable<{ deleted_jobs: number }> {
+    return this.http.delete<{ deleted_jobs: number }>('/api/me/data');
+  }
+
   startJob(): Observable<Job> {
     return this.http.post<Job>('/api/jobs', null);
   }

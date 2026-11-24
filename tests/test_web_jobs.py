@@ -82,6 +82,15 @@ def test_updates_never_create_a_missing_job(store, jobs_table):
     assert jobs_table.items == {}
 
 
+def test_delete_for_owner_removes_only_that_users_jobs(store, jobs_table):
+    mine = [store.create("1", "octo")["job_id"], store.create("1", "octo", kind=jobs.LISTS)["job_id"]]
+    other = store.create("2", "someone")["job_id"]
+
+    assert sorted(store.ids_for_owner("1")) == sorted(mine)
+    assert store.delete_for_owner("1") == 2
+    assert list(jobs_table.items) == [other]
+
+
 def test_public_view_hides_owner_and_converts_decimals():
     job = {"job_id": "j", "owner_id": "1", "login": "octo", "status": jobs.DONE, "updated_at": Decimal(1000),
            "categories": {"AI": Decimal(3)}, "expires_at": Decimal(9)}

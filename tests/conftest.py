@@ -21,7 +21,18 @@ class FakeTable:
         item = self.items.get(Key[self.key])
         return {"Item": dict(item)} if item is not None else {}
 
-    def update_item(self, Key, UpdateExpression, ExpressionAttributeNames, ExpressionAttributeValues, ConditionExpression=None):
+    def delete_item(self, Key):
+        self.items.pop(Key[self.key], None)
+
+    def query(self, IndexName, KeyConditionExpression, ExpressionAttributeNames, ExpressionAttributeValues):
+        """A KEYS_ONLY index on one attribute, returned in a single page."""
+        name, value = re.fullmatch(r"(#\w+) = (:\w+)", KeyConditionExpression).groups()
+        field, wanted = ExpressionAttributeNames[name], ExpressionAttributeValues[value]
+        matches = [item for item in self.items.values() if item.get(field) == wanted]
+        return {"Items": [{self.key: item[self.key], field: wanted} for item in matches]}
+
+    def update_item(self, Key, UpdateExpression, ExpressionAttributeNames, ExpressionAttributeValues=None, ConditionExpression=None):
+        ExpressionAttributeValues = ExpressionAttributeValues or {}
         item = self.items.get(Key[self.key])
         if not self._allowed(item, ConditionExpression, ExpressionAttributeNames, ExpressionAttributeValues):
             raise self._condition_failed("UpdateItem")
@@ -35,6 +46,9 @@ class FakeTable:
             name, value = assignments.split(" ")
             field = ExpressionAttributeNames[name]
             item[field] = item.get(field, 0) + ExpressionAttributeValues[value]
+        elif action == "REMOVE":
+            for name in re.findall(r"#\w+", assignments):
+                item.pop(ExpressionAttributeNames[name], None)
 
     def _allowed(self, item, condition, names, values) -> bool:
         if condition is None:

@@ -1,5 +1,5 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
-import { RouterLink } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import { LOGIN_URL, StarsortApi } from '../../starsort-api';
 import { ThemeSwitch } from '../../theme-switch/theme-switch';
 
@@ -14,6 +14,7 @@ export class Landing implements OnInit {
 
   protected readonly loginUrl = LOGIN_URL;
   protected readonly signedIn = signal(false);
+  protected readonly dataDeleted = inject(ActivatedRoute).snapshot.queryParamMap.get('deleted') === '1';
 
   ngOnInit(): void {
     this.api.me().subscribe({
